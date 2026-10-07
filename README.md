@@ -30,15 +30,13 @@ Gdy na koncie jest więcej niż jeden profil Steama, pyta: „Which profile do y
 
 ## Głos
 
-Najbliższy gotowy głos ElevenLabs do J.A.R.V.I.S. to **Daniel** (brytyjski, spokojny). W oknie kliknij zębatkę, wklej klucz API i zapisz go. Klucz zostaje tylko w `%APPDATA%\JarvisAI\config.json`.
-
-Bez klucza Jarvis mówi zapasowym brytyjskim głosem, żeby program działał od razu po instalacji.
+Głos jest już nagrany i wgrany w program. Klucz ElevenLabs nie jest potrzebny. Jeśli kiedyś wkleisz klucz w ustawieniach, nowe zdania mogą iść do głosu Daniel. Klucz zostaje tylko w `%APPDATA%\JarvisAI\config.json`.
 
 ## Co jest lokalne, a co idzie w sieć
 
 - Hasło „Hey Jarvis” jest rozpoznawane lokalnie.
-- Treść polecenia (na przykład nazwa gry) jest wysyłana do rozpoznawania mowy Google.
-- Przy włączonym ElevenLabs tekst odpowiedzi idzie do ElevenLabs. Inaczej do usługi głosu Microsoftu.
+- Treść polecenia (na przykład nazwa gry) jest rozpoznawana lokalnie, a gdy to nie wystarczy, także przez Google po angielsku i po polsku.
+- Gotowe odpowiedzi odtwarzają nagrania z programu. Zdania, których nie ma w nagraniach, dogrywa lokalny zapis albo, przy kluczu, ElevenLabs.
 
 ## Budowanie instalatora
 

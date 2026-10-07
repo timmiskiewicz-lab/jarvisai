@@ -267,7 +267,7 @@ document.getElementById("save").addEventListener("click", async () => {
   const result = await window.pywebview.api.save_settings(document.getElementById("api-key").value);
   note.textContent = result.elevenlabs
     ? "Daniel is ready."
-    : "Backup voice will be used until an API key is saved.";
+    : "Built-in Jarvis voice stays on.";
 });
 
 document.getElementById("test-voice").addEventListener("click", async () => {

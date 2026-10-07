@@ -5,8 +5,10 @@ __pycache__/
 build/
 dist/
 *.spec
-config.json
+/config.json
 *.log
 *.mp3
+!assets/voice/*.mp3
+assets/stt/**/model.bin
 .idea/
 .vs/

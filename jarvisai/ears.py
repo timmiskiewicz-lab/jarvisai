@@ -6,10 +6,13 @@ import shutil
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+from jarvisai.brain import Catalog, choose_transcript, command_score, is_wake_only
 
 log = logging.getLogger("jarvisai.ears")
 
@@ -26,10 +29,11 @@ class Heard:
 class Ears:
     """Local wake word, then one spoken command."""
 
-    def __init__(self, state, settings_provider, on_wake) -> None:
+    def __init__(self, state, settings_provider, on_wake, catalog_provider=None) -> None:
         self.state = state
         self.settings_provider = settings_provider
         self.on_wake = on_wake
+        self.catalog_provider = catalog_provider
         self.running = True
         self._capture = False
         self._generation = 0
@@ -80,6 +84,7 @@ class Ears:
             return
 
         model = _load_wake_model()
+        threading.Thread(target=_load_whisper, name="jarvis-stt", daemon=True).start()
         while self.running:
             try:
                 self._listen(sd, model)
@@ -97,6 +102,7 @@ class Ears:
         ) as stream:
             self.state.update(status="Standing by")
             buffer: list[np.ndarray] = []
+            preroll: deque[np.ndarray] = deque(maxlen=8)
             started = False
             silence_ms = 0
             started_at = 0.0
@@ -118,11 +124,13 @@ class Ears:
                 if capturing:
                     if generation != self._generation:
                         generation = self._generation
-                        buffer = []
-                        started = False
+                        threshold = max(160.0, self._noise * 2.4)
+                        buffer = list(preroll)
+                        preroll.clear()
+                        started = any(_rms(chunk) >= threshold for chunk in buffer)
                         silence_ms = 0
                         started_at = time.time()
-                    threshold = max(320.0, self._noise * 3.8)
+                    threshold = max(160.0, self._noise * 2.4)
                     if loud >= threshold:
                         started = True
                         silence_ms = 0
@@ -130,15 +138,19 @@ class Ears:
                     elif started:
                         buffer.append(samples.copy())
                         silence_ms += 80
-                        if silence_ms >= 900 or len(buffer) >= 90:
+                        if silence_ms >= 1280 or len(buffer) >= 100:
                             self._transcribe(buffer, generation)
                             buffer = []
                             started = False
-                    elif time.time() - started_at > 7.5:
+                    elif time.time() - started_at > 8.0:
                         self._finish(generation, Heard(""))
                     continue
 
                 generation = -1
+                if mode == "speaking":
+                    preroll.clear()
+                else:
+                    preroll.append(samples.copy())
                 self._noise = self._noise * 0.98 + loud * 0.02
                 if mode in {"speaking", "thinking", "listening"}:
                     self._hits = 0
@@ -176,20 +188,31 @@ class Ears:
             return
         self.state.update(mode="thinking", status="Recognizing", amplitude=0.0)
         raw = np.concatenate(frames).tobytes()
+        catalog = self._catalog()
         try:
-            import speech_recognition as sr
-
-            audio = sr.AudioData(raw, SAMPLE_RATE, 2)
-            text = sr.Recognizer().recognize_google(audio, language="en-US")
-            log.info("Heard: %s", text)
-            self._finish(generation, Heard(text.strip()))
+            options = _google_options(raw)
+            text = choose_transcript(options, catalog)
+            weak = command_score(text, catalog) < 0.72 and not is_wake_only(text)
+            if weak:
+                names = [game.name for game in catalog.games]
+                options.extend(_whisper_options(raw, names))
+                text = choose_transcript(options, catalog)
+            log.info("Heard: %s", text or "(silence)")
+            if options:
+                log.info("Alternatives: %s", " | ".join(options[:8]))
+            self._finish(generation, Heard(text))
         except Exception as error:
-            name = type(error).__name__
-            if name == "UnknownValueError":
-                self._finish(generation, Heard(""))
-                return
             log.exception("Speech recognition failed")
-            self._finish(generation, Heard(None, error=name))
+            self._finish(generation, Heard(None, error=type(error).__name__))
+
+    def _catalog(self) -> Catalog:
+        if self.catalog_provider is None:
+            return Catalog(False, [], [])
+        try:
+            return self.catalog_provider()
+        except Exception:
+            log.debug("Catalog unavailable during recognition", exc_info=True)
+            return Catalog(False, [], [])
 
 
 def _rms(samples: np.ndarray) -> float:
@@ -227,6 +250,99 @@ def _load_wake_model():
     except Exception:
         log.exception("Wake word model failed")
         return None
+
+
+_whisper_model = None
+_whisper_lock = threading.Lock()
+
+
+def _stt_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS")) / "assets" / "stt" / "faster-whisper-base"
+    return Path(__file__).resolve().parents[1] / "assets" / "stt" / "faster-whisper-base"
+
+
+def _load_whisper():
+    global _whisper_model
+    with _whisper_lock:
+        if _whisper_model is not None:
+            return _whisper_model
+        folder = _stt_dir()
+        if not (folder / "model.bin").exists():
+            log.info("Local speech model is not installed")
+            return None
+        try:
+            from faster_whisper import WhisperModel
+
+            log.info("Loading local speech model")
+            _whisper_model = WhisperModel(
+                str(folder),
+                device="cpu",
+                compute_type="int8",
+                local_files_only=True,
+            )
+            log.info("Local speech model ready")
+            return _whisper_model
+        except Exception:
+            log.exception("Local speech model failed")
+            return None
+
+
+def _google_options(raw: bytes) -> list[str]:
+    import speech_recognition as sr
+
+    audio = sr.AudioData(raw, SAMPLE_RATE, 2)
+    recognizer = sr.Recognizer()
+    found: list[str] = []
+    for language in ("en-US", "pl-PL"):
+        try:
+            result = recognizer.recognize_google(audio, language=language, show_all=True)
+        except Exception as error:
+            if type(error).__name__ == "UnknownValueError":
+                continue
+            log.warning("Google %s failed: %s", language, type(error).__name__)
+            continue
+        found.extend(_transcripts(result))
+    return found
+
+
+def _transcripts(result) -> list[str]:
+    if not result:
+        return []
+    if isinstance(result, str):
+        return [result]
+    alternatives = result.get("alternative") if isinstance(result, dict) else None
+    if not alternatives:
+        return []
+    texts: list[str] = []
+    for item in alternatives:
+        if isinstance(item, str) and item.strip():
+            texts.append(item.strip())
+        elif isinstance(item, dict) and str(item.get("transcript", "")).strip():
+            texts.append(str(item["transcript"]).strip())
+    return texts
+
+
+def _whisper_options(raw: bytes, names: list[str]) -> list[str]:
+    model = _load_whisper()
+    if model is None:
+        return []
+    audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    prompt = "Hey Jarvis. Launch, start, open, play, odpal, uruchom, włącz. " + ", ".join(names[:40])
+    try:
+        segments, _info = model.transcribe(
+            audio,
+            task="transcribe",
+            initial_prompt=prompt,
+            beam_size=5,
+            vad_filter=False,
+            condition_on_previous_text=False,
+        )
+        text = " ".join(segment.text.strip() for segment in segments).strip()
+        return [text] if text else []
+    except Exception:
+        log.exception("Local transcription failed")
+        return []
 
 
 def _wake_score(model, samples: np.ndarray) -> float:

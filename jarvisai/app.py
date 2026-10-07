@@ -97,12 +97,12 @@ class JarvisApp:
         self._quitting = False
         self.window = None
         self.icon = None
-        self.ears = Ears(self.state, lambda: self.settings, self.request_conversation)
+        self.ears = Ears(self.state, lambda: self.settings, self.request_conversation, self.catalog)
 
     def voice_label(self) -> str:
         if self.settings.uses_elevenlabs:
             return "Daniel · ElevenLabs"
-        return "Ryan · add an ElevenLabs key for the Jarvis voice"
+        return "Jarvis"
 
     def speak(self, text: str) -> None:
         self.state.update(mode="speaking", caption=text, status="Speaking", amplitude=0.0)
@@ -160,6 +160,8 @@ class JarvisApp:
                         phase="idle",
                     )
                     continue
+                if heard.text:
+                    self.state.update(status=f"Heard: {heard.text}", caption=heard.text)
                 step = self.brain.handle(heard.text, self.catalog())
         except Exception:
             log.exception("Conversation failed")

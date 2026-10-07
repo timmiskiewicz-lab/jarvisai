@@ -1,6 +1,14 @@
 import unittest
 
-from jarvisai.brain import Brain, Catalog, GREETINGS, rank_games, score_name
+from jarvisai.brain import (
+    Brain,
+    Catalog,
+    GREETINGS,
+    choose_transcript,
+    is_wake_only,
+    rank_games,
+    score_name,
+)
 from jarvisai.steam import Game, Profile, needs_account_switch
 
 GAMES = [
@@ -39,9 +47,29 @@ class MatchingTests(unittest.TestCase):
 
 class ConversationTests(unittest.TestCase):
     def test_greeting_is_one_of_the_jarvis_lines(self):
-        step = Brain().begin()
+        brain = Brain()
+        brain.begin()
+        step = brain.handle("Play Jarvis", catalog())
         self.assertIn(step.say, GREETINGS)
         self.assertTrue(step.listen)
+        self.assertIsNone(step.launch)
+
+    def test_hey_jarvis_is_not_a_steam_search(self):
+        brain = Brain()
+        brain.begin()
+        for phrase in ("Hey Jarvis", "play jarvis", "ok jarvis"):
+            step = brain.handle(phrase, catalog())
+            self.assertIsNone(step.launch)
+            self.assertNotIn("couldn't find", (step.say or "").lower())
+
+    def test_transcript_prefers_the_installed_game(self):
+        self.assertTrue(is_wake_only("Play Jarvis"))
+        self.assertFalse(is_wake_only("odpal gothic 1"))
+        chosen = choose_transcript(
+            ["John Gotti classic", "odpal Gothic 1", "Play Jarvis"],
+            catalog(),
+        )
+        self.assertIn("Gothic 1", chosen)
 
     def test_two_profiles_are_offered_in_order(self):
         brain = Brain()

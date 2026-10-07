@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import threading
+from pathlib import Path
 
 import numpy as np
 import requests
 
 from jarvisai.config import Settings, load_settings
+from jarvisai.paths import bundle_root, user_data_dir
 
 log = logging.getLogger("jarvisai.tts")
 
@@ -24,11 +27,18 @@ class Speaker:
         text = " ".join(text.split())
         if not text:
             return
-        samples, rate = self._synthesize(text)
+        bundled = _clip_file(text, bundle_root() / "assets" / "voice")
+        if bundled is not None:
+            samples, rate = _decode_mp3(bundled.read_bytes())
+        else:
+            samples, rate = self._synthesize(text)
         with self._lock:
             _play(samples, rate, on_amplitude)
 
     def _synthesize(self, text: str) -> tuple[np.ndarray, int]:
+        cached = _clip_file(text, user_data_dir() / "voice")
+        if cached is not None and not self.settings.uses_elevenlabs:
+            return _decode_mp3(cached.read_bytes())
         settings = self.settings
         if settings.uses_elevenlabs:
             try:
@@ -37,6 +47,7 @@ class Speaker:
             except Exception:
                 log.exception("ElevenLabs failed, using the backup voice")
         audio = _edge(text, settings)
+        _store_clip(text, audio)
         return _decode_mp3(audio)
 
 
@@ -83,6 +94,26 @@ def _edge(text: str, settings: Settings) -> bytes:
     if not audio:
         raise RuntimeError("Backup voice returned no audio")
     return audio
+
+
+def clip_name(text: str) -> str:
+    key = " ".join(text.split()).encode("utf-8")
+    return hashlib.sha1(key).hexdigest()[:16] + ".mp3"
+
+
+def _clip_file(text: str, folder: Path) -> Path | None:
+    path = folder / clip_name(text)
+    if path.exists() and path.stat().st_size > 0:
+        return path
+    return None
+
+
+def _store_clip(text: str, audio: bytes) -> None:
+    if not audio:
+        return
+    folder = user_data_dir() / "voice"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / clip_name(text)).write_bytes(audio)
 
 
 def _decode_mp3(data: bytes) -> tuple[np.ndarray, int]:

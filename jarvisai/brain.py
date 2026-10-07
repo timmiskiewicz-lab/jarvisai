@@ -58,7 +58,7 @@ _NUMBER_WORDS = {
 
 _LAUNCH = re.compile(
     r"\b(?:please\s+)?(?:can you\s+|could you\s+|would you\s+)?"
-    r"(?:launch|start|open|run|play|boot|fire up|uruchom|odpal|wlacz|włącz)"
+    r"(?:launch|start|open|run|play|boot|fire up|uruchom|odpal|wlacz|włącz|wlacz|zagraj|otworz|otwórz)"
     r"\b\s+(?:the\s+)?(?:game\s+)?(.+)",
     re.IGNORECASE,
 )
@@ -69,8 +69,9 @@ _PROFILE_HINT = re.compile(
     r"\b(?:\s+profile)?",
     re.IGNORECASE,
 )
-_CANCEL = re.compile(r"\b(cancel|never mind|nevermind|stop|abort|forget it|anuluj)\b", re.IGNORECASE)
-_WAKE = re.compile(r"\b(?:hey|hi|ok|okay)\s+jarv\w*\b", re.IGNORECASE)
+_CANCEL = re.compile(r"\b(cancel|never mind|nevermind|stop|abort|forget it|anuluj|nieważne|niewazne)\b", re.IGNORECASE)
+_WAKE = re.compile(r"\b(?:hey|hi|ok|okay|yo)\s+jarv\w*\b", re.IGNORECASE)
+_JARVIS_WORD = re.compile(r"\bjarv\w*\b", re.IGNORECASE)
 
 
 @dataclass
@@ -153,6 +154,55 @@ def strip_wake(text: str) -> str:
     return _WAKE.sub(" ", text).strip(" ,.")
 
 
+def is_wake_only(text: str) -> bool:
+    """True when the phrase is only the wake word, including the mishearing 'play jarvis'."""
+    raw = _JARVIS_WORD.sub(" ", strip_wake(text))
+    target = extract_launch_target(raw)
+    if target and not _JARVIS_WORD.fullmatch(normalize(target).strip()):
+        return False
+    leftover = re.sub(
+        r"\b(play|start|launch|open|run|boot|please|hey|hi|ok|okay|yo|the|a|an|game|sir)\b",
+        " ",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    leftover = re.sub(r"[^a-z0-9]+", " ", leftover.lower()).strip()
+    return leftover == ""
+
+
+def command_score(text: str, catalog: Catalog) -> float:
+    if is_wake_only(text):
+        return -1.0
+    target = extract_launch_target(strip_wake(text))
+    query = target or text
+    matches = rank_games(query, catalog.games)
+    if not matches:
+        return 0.0
+    score = score_name(query, matches[0].name)
+    if target:
+        score += 0.15
+    if len(matches) == 1 and score >= 0.8:
+        score += 0.1
+    return score
+
+
+def choose_transcript(options: list[str], catalog: Catalog) -> str:
+    cleaned: list[str] = []
+    for option in options:
+        text = " ".join((option or "").split())
+        if text and text not in cleaned:
+            cleaned.append(text)
+    if not cleaned:
+        return ""
+    ranked = sorted(cleaned, key=lambda text: command_score(text, catalog), reverse=True)
+    if command_score(ranked[0], catalog) > 0:
+        return ranked[0]
+    for text in cleaned:
+        if not is_wake_only(text):
+            return text
+    return cleaned[0]
+
+
 def extract_launch_target(text: str) -> str | None:
     match = _LAUNCH.search(text.strip())
     if not match:
@@ -210,6 +260,7 @@ class Brain:
         self._retries = 0
         self._pending_hint: str | None = None
         self._pending_named: int | None = None
+        self._greeted = False
 
     def begin(self) -> Step:
         self.phase = "command"
@@ -219,15 +270,23 @@ class Brain:
         self._game = None
         self._pending_hint = None
         self._pending_named = None
-        return Step(say=random.choice(GREETINGS), listen=True, phase="command")
+        self._greeted = False
+        return Step(listen=True, phase="command")
+
+    def _acknowledge(self) -> Step:
+        if not self._greeted:
+            self._greeted = True
+            self.phase = "command"
+            return Step(say=random.choice(GREETINGS), listen=True, phase="command")
+        self._retries += 1
+        if self._retries <= 2:
+            return Step(say="Yes, sir?", listen=True, phase=self.phase)
+        self.phase = "idle"
+        return Step(say="Standing by, sir.", listen=False, phase="idle")
 
     def handle(self, text: str | None, catalog: Catalog) -> Step:
-        if text is None or not text.strip():
-            self._retries += 1
-            if self._retries <= 1 and self.phase in {"command", "game", "profile"}:
-                return Step(say="I didn't catch that, sir.", listen=True, phase=self.phase)
-            self.phase = "idle"
-            return Step(say="Standing by, sir.", listen=False, phase="idle")
+        if text is None or not text.strip() or (self.phase == "command" and is_wake_only(text)):
+            return self._acknowledge()
 
         if _CANCEL.search(text):
             self.phase = "idle"
@@ -262,9 +321,17 @@ class Brain:
 
         matches = rank_games(target, catalog.games)
         if not matches:
+            self._retries += 1
+            if self._retries <= 1:
+                self.phase = "command"
+                return Step(
+                    say="I couldn't find that game, sir. Say the name again.",
+                    listen=True,
+                    phase="command",
+                )
             self.phase = "idle"
             return Step(
-                say=f"I couldn't find {target} in your Steam library, sir.",
+                say="I couldn't find that game in your Steam library, sir.",
                 listen=False,
                 phase="idle",
             )

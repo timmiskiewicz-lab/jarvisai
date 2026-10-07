@@ -9,6 +9,8 @@ if (-not (Test-Path $python)) {
 }
 & $python -m pip install -r (Join-Path $root "requirements.txt")
 & $python (Join-Path $root "tools\make_icon.py")
+& $python (Join-Path $root "tools\fetch_stt.py")
+& $python (Join-Path $root "tools\render_voice.py")
 
 $dist = Join-Path $env:TEMP "jarvisai-dist"
 $work = Join-Path $env:TEMP "jarvisai-work"
@@ -31,7 +33,11 @@ foreach ($path in @($dist, $work, $spec)) {
     --add-data "$root\assets\wake\melspectrogram.onnx;openwakeword\resources\models" `
     --add-data "$root\assets\wake\embedding_model.onnx;openwakeword\resources\models" `
     --add-data "$root\assets\wake\hey_jarvis_v0.1.onnx;openwakeword\resources\models" `
+    --add-data "$root\assets\voice;assets\voice" `
+    --add-data "$root\assets\stt;assets\stt" `
     --collect-all openwakeword `
+    --collect-all faster_whisper `
+    --collect-all ctranslate2 `
     --collect-all webview `
     --collect-all edge_tts `
     --collect-all _sounddevice_data `
