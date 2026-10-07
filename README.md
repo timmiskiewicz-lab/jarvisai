@@ -27,6 +27,7 @@ Potem możesz kazać mu odpalić zainstalowaną grę ze Steama:
 - `play Bohemian Rhapsody by Queen` puszcza utwór na Spotify i mówi „Playing Bohemian Rhapsody by Queen, sir.”
 - `play random song by Queen` wybiera losową piosenkę tego zespołu. Jak Spotify jest zainstalowany, otwiera aplikację. Jak nie ma aplikacji, otwiera stronę w przeglądarce.
 - `Jarvis, turn this up` od razu podgłaśnia Windows o 10 procent. Działa też `louder`, `volume up` i `głośniej`.
+- Można podać własną liczbę procent. `Jarvis, turn this up by 20 percent` podnosi o 20. Po polsku: `podgłośnij o 30 procent`. Na 100% Jarvis mówi, że głośniej już nie pójdzie.
 
 Gdy na koncie jest więcej niż jeden profil Steama, pyta: „Which profile do you want me to launch, sir?” Odpowiedz `first`, `second` albo nazwą profilu. Jeśli profil nie jest tym, na którym Steam jest teraz zalogowany, Jarvis przełączy konto na czas uruchomienia gry. Steam musi mieć zapamiętane hasło tego profilu.
 
@@ -34,7 +35,23 @@ Gdy na koncie jest więcej niż jeden profil Steama, pyta: „Which profile do y
 
 ## Gemini
 
-Program startuje tylko wtedy, gdy w zmiennych użytkownika jest `GEMINI_API_KEY`. Klucz nie trafia do plików projektu ani na GitHub. Jarvis wysyła do Gemini to, co usłyszał, i listę zainstalowanych gier, żeby wybrać właściwe polecenie.
+Klucz API wkleja się w ustawieniach aplikacji. Jarvis sam zapisuje go w zmiennej użytkownika `GEMINI_API_KEY`. Klucz nie trafia do folderu programu ani do repozytorium. Jarvis wysyła do Gemini to, co usłyszał, i listę gier ze Steama, żeby wybrać właściwe polecenie.
+
+### Skąd wziąć klucz
+
+1. Wejdź na [Google AI Studio](https://aistudio.google.com/apikey) i zaloguj się kontem Google.
+2. Wybierz **Create API key**.
+3. Wskaż projekt Google Cloud albo utwórz nowy, gdy Studio o to poprosi.
+4. Skopiuj klucz.
+
+### Wklejenie klucza w Jarvisie
+
+1. Uruchom **JarvisAI**. Przy pierwszym uruchomieniu, gdy klucza jeszcze nie ma, okno ustawień otwiera się samo.
+2. Możesz je też otworzyć później ikoną zębatki w prawym górnym rogu HUD-a.
+3. W polu **Gemini API key** wklej skopiowany klucz.
+4. Naciśnij **Save**.
+
+Po zapisie program wpisuje klucz do zmiennej użytkownika `GEMINI_API_KEY`, tak jak klucz ElevenLabs zapisuje się z poziomu aplikacji. Jarvis od razu z niego korzysta. Wyłączenie i ponowne włączenie programu nie jest potrzebne. Pole **ElevenLabs API key** pod spodem jest opcjonalne i dotyczy tylko głosu, nie Gemini.
 
 ## Głos
 

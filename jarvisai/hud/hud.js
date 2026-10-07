@@ -251,7 +251,7 @@ document.getElementById("settings-open").addEventListener("click", async () => {
     return;
   }
   const settings = await window.pywebview.api.get_settings();
-  document.getElementById("api-key").value = settings.api_key || "";
+  fillSettings(settings);
 });
 
 document.getElementById("settings-close").addEventListener("click", () => {
@@ -264,10 +264,14 @@ document.getElementById("save").addEventListener("click", async () => {
     note.textContent = "Save is available in the desktop app.";
     return;
   }
-  const result = await window.pywebview.api.save_settings(document.getElementById("api-key").value);
-  note.textContent = result.elevenlabs
-    ? "Daniel is ready."
-    : "Built-in Jarvis voice stays on.";
+  const result = await window.pywebview.api.save_settings(
+    document.getElementById("api-key").value,
+    document.getElementById("gemini-key").value,
+  );
+  const voice = result.elevenlabs ? "Daniel is ready." : "Built-in Jarvis voice stays on.";
+  note.textContent = result.gemini
+    ? `Gemini key saved. ${voice}`
+    : `Add a Gemini key, then save. ${voice}`;
 });
 
 document.getElementById("test-voice").addEventListener("click", async () => {
@@ -296,11 +300,25 @@ document.getElementById("install-wallpaper").addEventListener("click", async () 
 
 resize();
 requestAnimationFrame(draw);
-window.addEventListener("pywebviewready", () => {
+function fillSettings(settings) {
+  document.getElementById("api-key").value = settings.api_key || "";
+  document.getElementById("gemini-key").value = settings.gemini_key || "";
+}
+
+window.addEventListener("pywebviewready", async () => {
   if (demo) {
     clearInterval(demo);
     demo = null;
   }
   poll();
+  try {
+    const settings = await window.pywebview.api.get_settings();
+    fillSettings(settings);
+    if (!settings.gemini) {
+      settingsEl.classList.remove("hidden");
+    }
+  } catch (error) {
+    console.error(error);
+  }
 });
 setTimeout(startDemo, 700);

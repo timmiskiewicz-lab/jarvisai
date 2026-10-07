@@ -45,6 +45,39 @@ def api_key() -> str:
     return value
 
 
+def store_api_key(value: str) -> None:
+    """Save the Gemini key in the current user's environment. It never goes into the app folder."""
+    key = (value or "").strip()
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as reg:
+        if key:
+            winreg.SetValueEx(reg, _ENV_NAME, 0, winreg.REG_SZ, key)
+        else:
+            try:
+                winreg.DeleteValue(reg, _ENV_NAME)
+            except OSError:
+                pass
+    if key:
+        os.environ[_ENV_NAME] = key
+    else:
+        os.environ.pop(_ENV_NAME, None)
+    _broadcast_environment()
+
+
+def _broadcast_environment() -> None:
+    import ctypes
+
+    result = ctypes.c_ulong()
+    ctypes.windll.user32.SendMessageTimeoutW(
+        0xFFFF,
+        0x001A,
+        0,
+        "Environment",
+        0x0002,
+        500,
+        ctypes.byref(result),
+    )
+
+
 def parse_intent(raw: str) -> dict:
     text = raw.strip()
     fenced = re.search(r"\{.*\}", text, re.DOTALL)

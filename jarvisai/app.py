@@ -22,7 +22,7 @@ from jarvisai.brain import (
 )
 from jarvisai.config import load_settings, save_settings
 from jarvisai.ears import Ears, Heard
-from jarvisai.gemini import api_key, interpret
+from jarvisai.gemini import api_key, interpret, store_api_key
 from jarvisai.link import StateLink
 from jarvisai.paths import hud_dir, log_path
 from jarvisai.wallpaper import ASK_LINE, find_engine, install_and_apply, remember, should_ask
@@ -90,14 +90,22 @@ class Api:
             "api_key": settings.elevenlabs_api_key,
             "voice_id": settings.elevenlabs_voice_id,
             "elevenlabs": settings.uses_elevenlabs,
+            "gemini_key": api_key(),
+            "gemini": bool(api_key()),
         }
 
-    def save_settings(self, api_key: str) -> dict:
+    def save_settings(self, api_key: str, gemini_key: str | None = None) -> dict:
         self._app.settings.elevenlabs_api_key = (api_key or "").strip()
         save_settings(self._app.settings)
         self._app.speaker.reload()
-        log.info("Voice settings saved")
-        return {"ok": True, "elevenlabs": self._app.settings.uses_elevenlabs}
+        if gemini_key is not None:
+            store_api_key(gemini_key)
+        log.info("Settings saved")
+        return {
+            "ok": True,
+            "elevenlabs": self._app.settings.uses_elevenlabs,
+            "gemini": bool(api_key()),
+        }
 
     def test_voice(self) -> dict:
         return {"ok": self._app.test_voice()}
@@ -471,16 +479,6 @@ def main() -> None:
     _prepare_windows()
     if _already_running():
         log.info("JarvisAI is already running")
-        return
-    if not api_key():
-        ctypes.windll.user32.MessageBoxW(
-            0,
-            "JarvisAI needs a Gemini API key before it can start.\n\n"
-            "Set the GEMINI_API_KEY user environment variable, then open JarvisAI again.\n"
-            "The key is not stored in the program folder.",
-            "JarvisAI",
-            0x30,
-        )
         return
     try:
         ensure_autostart()

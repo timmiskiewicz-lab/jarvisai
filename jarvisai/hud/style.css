@@ -192,6 +192,8 @@ canvas {
 
 .panel {
   width: min(520px, calc(100% - 48px));
+  max-height: calc(100% - 48px);
+  overflow: auto;
   padding: 28px;
   border: 1px solid rgba(122, 239, 255, 0.35);
   border-radius: 18px;

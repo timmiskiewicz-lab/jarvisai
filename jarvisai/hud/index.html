@@ -12,7 +12,7 @@
     <span class="brand pywebview-drag-region">J.A.R.V.I.S.</span>
     <div class="drag-fill pywebview-drag-region"></div>
     <div class="actions">
-      <button id="settings-open" type="button" title="Voice settings">⚙</button>
+      <button id="settings-open" type="button" title="Settings">⚙</button>
       <button id="hide" type="button" title="Hide to tray">–</button>
     </div>
   </header>
@@ -31,6 +31,10 @@
 
   <section id="settings" class="hidden">
     <div class="panel">
+      <h2>Gemini</h2>
+      <p>Paste your Gemini API key here and press Save. Jarvis stores it in the GEMINI_API_KEY user variable.</p>
+      <label for="gemini-key">Gemini API key</label>
+      <input id="gemini-key" type="password" autocomplete="off" spellcheck="false" />
       <h2>Voice</h2>
       <p>The Jarvis voice is already built in. An ElevenLabs key is optional and only used for lines that were not recorded.</p>
       <label for="api-key">ElevenLabs API key</label>
