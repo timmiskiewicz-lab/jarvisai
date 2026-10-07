@@ -284,6 +284,16 @@ document.getElementById("listen-now").addEventListener("click", async () => {
   }
 });
 
+document.getElementById("install-wallpaper").addEventListener("click", async () => {
+  const note = document.getElementById("settings-note");
+  if (!window.pywebview) {
+    note.textContent = "Wallpaper install is available in the desktop app.";
+    return;
+  }
+  const result = await window.pywebview.api.install_wallpaper();
+  note.textContent = result.message || "Wallpaper Engine did not respond.";
+});
+
 resize();
 requestAnimationFrame(draw);
 window.addEventListener("pywebviewready", () => {

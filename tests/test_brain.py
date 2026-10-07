@@ -62,6 +62,24 @@ class ConversationTests(unittest.TestCase):
             self.assertIsNone(step.launch)
             self.assertNotIn("couldn't find", (step.say or "").lower())
 
+    def test_wallpaper_yes_and_no(self):
+        brain = Brain()
+        brain.begin()
+        brain.phase = "wallpaper"
+        yes = brain.handle("tak, zainstaluj", catalog())
+        self.assertEqual(yes.wallpaper, "install")
+        brain.phase = "wallpaper"
+        no = brain.handle("nie", catalog())
+        self.assertEqual(no.wallpaper, "decline")
+
+    def test_gemini_launch_uses_the_named_game(self):
+        brain = Brain()
+        brain.begin()
+        one = catalog(profiles=[PROFILES[0]])
+        step = brain.apply({"intent": "launch", "game": "Portal 2", "choice": ""}, one, "odpal to")
+        self.assertIsNotNone(step.launch)
+        self.assertEqual(step.launch[0].name, "Portal 2")
+
     def test_transcript_prefers_the_installed_game(self):
         self.assertTrue(is_wake_only("Play Jarvis"))
         self.assertFalse(is_wake_only("odpal gothic 1"))

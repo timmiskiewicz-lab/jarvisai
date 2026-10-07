@@ -28,6 +28,10 @@ Gdy na koncie jest więcej niż jeden profil Steama, pyta: „Which profile do y
 
 `cancel` przerywa wybór.
 
+## Gemini
+
+Program startuje tylko wtedy, gdy w zmiennych użytkownika jest `GEMINI_API_KEY`. Klucz nie trafia do plików projektu ani na GitHub. Jarvis wysyła do Gemini to, co usłyszał, i listę zainstalowanych gier, żeby wybrać właściwe polecenie.
+
 ## Głos
 
 Głos jest już nagrany i wgrany w program. Klucz ElevenLabs nie jest potrzebny. Jeśli kiedyś wkleisz klucz w ustawieniach, nowe zdania mogą iść do głosu Daniel. Klucz zostaje tylko w `%APPDATA%\JarvisAI\config.json`.

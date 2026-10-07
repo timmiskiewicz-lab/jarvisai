@@ -35,6 +35,7 @@ foreach ($path in @($dist, $work, $spec)) {
     --add-data "$root\assets\wake\hey_jarvis_v0.1.onnx;openwakeword\resources\models" `
     --add-data "$root\assets\voice;assets\voice" `
     --add-data "$root\assets\stt;assets\stt" `
+    --add-data "$root\wallpapers\jarvis;wallpapers\jarvis" `
     --collect-all openwakeword `
     --collect-all faster_whisper `
     --collect-all ctranslate2 `

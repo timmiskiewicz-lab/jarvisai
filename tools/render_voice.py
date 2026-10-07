@@ -27,6 +27,13 @@ FIXED = list(GREETINGS) + [
     "Say first, second, or the profile name, sir.",
     "I can't reach speech recognition right now, sir.",
     "Steam didn't close, so I couldn't switch profiles, sir.",
+    "I found Wallpaper Engine, sir. Shall I install the desktop interface?",
+    "Installing the desktop interface, sir.",
+    "The desktop interface is online, sir.",
+    "Say yes or no, sir.",
+    "I can't find Wallpaper Engine on this computer, sir.",
+    "I couldn't install the wallpaper, sir.",
+    "Gemini is offline, sir. I'll follow the direct commands.",
 ]
 
 

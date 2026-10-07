@@ -1,0 +1,14 @@
+{
+  "contentrating": "Everyone",
+  "description": "The J.A.R.V.I.S. interface. It listens and moves with the JarvisAI app.",
+  "file": "index.html",
+  "general": {
+    "properties": {}
+  },
+  "preview": "preview.jpg",
+  "tags": ["Jarvis", "Sci-Fi", "Interactive"],
+  "title": "J.A.R.V.I.S.",
+  "type": "web",
+  "visibility": "private",
+  "version": 1
+}

@@ -24,6 +24,7 @@ FRAME = 1280  # 80 ms, the size openWakeWord expects
 class Heard:
     text: str | None
     error: str | None = None
+    options: list[str] | None = None
 
 
 class Ears:
@@ -200,7 +201,7 @@ class Ears:
             log.info("Heard: %s", text or "(silence)")
             if options:
                 log.info("Alternatives: %s", " | ".join(options[:8]))
-            self._finish(generation, Heard(text))
+            self._finish(generation, Heard(text, options=options[:8]))
         except Exception as error:
             log.exception("Speech recognition failed")
             self._finish(generation, Heard(None, error=type(error).__name__))

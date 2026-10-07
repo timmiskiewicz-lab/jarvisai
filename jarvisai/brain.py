@@ -70,6 +70,11 @@ _PROFILE_HINT = re.compile(
     re.IGNORECASE,
 )
 _CANCEL = re.compile(r"\b(cancel|never mind|nevermind|stop|abort|forget it|anuluj|nieważne|niewazne)\b", re.IGNORECASE)
+_YES = re.compile(
+    r"\b(yes|yeah|yep|sure|ok|okay|do it|install|please|tak|dawaj|jasne|pewnie|zainstaluj|instaluj|chce|chcę)\b",
+    re.IGNORECASE,
+)
+_NO = re.compile(r"\b(no|nope|don't|dont|nie|zostaw|pomin|pomiń|later|pozniej|później)\b", re.IGNORECASE)
 _WAKE = re.compile(r"\b(?:hey|hi|ok|okay|yo)\s+jarv\w*\b", re.IGNORECASE)
 _JARVIS_WORD = re.compile(r"\bjarv\w*\b", re.IGNORECASE)
 
@@ -87,6 +92,7 @@ class Step:
     listen: bool = False
     launch: tuple[Game, Profile] | None = None
     phase: str = "idle"
+    wallpaper: str | None = None
 
 
 def normalize(text: str) -> str:
@@ -285,6 +291,10 @@ class Brain:
         return Step(say="Standing by, sir.", listen=False, phase="idle")
 
     def handle(self, text: str | None, catalog: Catalog) -> Step:
+        if self.phase == "wallpaper":
+            if text is None or not text.strip():
+                return self._retry("Say yes or no, sir.")
+            return self._wallpaper_answer(text)
         if text is None or not text.strip() or (self.phase == "command" and is_wake_only(text)):
             return self._acknowledge()
 
@@ -399,6 +409,53 @@ class Brain:
         else:
             line = f"Launching {game.name}, sir."
         return Step(say=line, listen=False, launch=(game, profile), phase="idle")
+
+    def apply(self, intent: dict, catalog: Catalog, heard: str | None) -> Step:
+        kind = str(intent.get("intent") or "unknown")
+        if kind in {"wallpaper_yes", "wallpaper_no"} or self.phase == "wallpaper":
+            if kind == "wallpaper_no":
+                return self._decline_wallpaper()
+            if kind == "wallpaper_yes":
+                return self._accept_wallpaper()
+            if self.phase == "wallpaper":
+                return self._wallpaper_answer(heard or "")
+        if kind == "cancel":
+            self.phase = "idle"
+            return Step(say="Very well, sir.", listen=False, phase="idle")
+        if kind == "wake":
+            return self._acknowledge()
+        if kind == "launch" and intent.get("game"):
+            phrase = f"launch {intent['game']}"
+            choice = str(intent.get("choice") or "").strip()
+            if choice:
+                if re.fullmatch(r"first|second|third|fourth|fifth|sixth|seventh|eighth|[1-8]", choice, re.I):
+                    phrase += f" on the {choice} profile"
+                else:
+                    phrase += f" {choice}"
+            return self._command(phrase, catalog)
+        if kind == "choose":
+            return self.handle(str(intent.get("choice") or intent.get("game") or heard or ""), catalog)
+        return self.handle(heard, catalog)
+
+    def _wallpaper_answer(self, text: str) -> Step:
+        if _NO.search(text) and not _YES.search(text):
+            return self._decline_wallpaper()
+        if _YES.search(text):
+            return self._accept_wallpaper()
+        return self._retry("Say yes or no, sir.")
+
+    def _accept_wallpaper(self) -> Step:
+        self.phase = "idle"
+        return Step(
+            say="Installing the desktop interface, sir.",
+            listen=False,
+            phase="idle",
+            wallpaper="install",
+        )
+
+    def _decline_wallpaper(self) -> Step:
+        self.phase = "idle"
+        return Step(say="Very well, sir.", listen=False, phase="idle", wallpaper="decline")
 
     def _retry(self, line: str) -> Step:
         self._retries += 1

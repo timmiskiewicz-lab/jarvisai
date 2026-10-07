@@ -9,8 +9,11 @@ import threading
 from jarvisai.autostart import ensure_autostart
 from jarvisai.brain import Brain, Catalog, Step
 from jarvisai.config import load_settings, save_settings
-from jarvisai.ears import Ears
+from jarvisai.ears import Ears, Heard
+from jarvisai.gemini import api_key, interpret
+from jarvisai.link import StateLink
 from jarvisai.paths import hud_dir, log_path
+from jarvisai.wallpaper import ASK_LINE, find_engine, install_and_apply, remember, should_ask
 from jarvisai.steam import (
     autologin_user,
     installed_games,
@@ -58,6 +61,7 @@ class Api:
     def get_state(self) -> dict:
         snap = self._app.state.snapshot()
         snap["voice"] = self._app.voice_label()
+        snap["wallpaper"] = find_engine() is not None
         return snap
 
     def hide_window(self) -> bool:
@@ -86,6 +90,12 @@ class Api:
         self._app.request_conversation()
         return True
 
+    def install_wallpaper(self) -> dict:
+        if find_engine() is None:
+            return {"ok": False, "message": "Wallpaper Engine is not installed."}
+        message = install_and_apply()
+        return {"ok": "online" in message.lower() or "copied" in message.lower(), "message": message}
+
 
 class JarvisApp:
     def __init__(self) -> None:
@@ -98,6 +108,8 @@ class JarvisApp:
         self.window = None
         self.icon = None
         self.ears = Ears(self.state, lambda: self.settings, self.request_conversation, self.catalog)
+        self.link = StateLink(self.state.snapshot)
+        self._offer_attempts = 0
 
     def voice_label(self) -> str:
         if self.settings.uses_elevenlabs:
@@ -162,7 +174,7 @@ class JarvisApp:
                     continue
                 if heard.text:
                     self.state.update(status=f"Heard: {heard.text}", caption=heard.text)
-                step = self.brain.handle(heard.text, self.catalog())
+                step = self._understand(heard, self.catalog())
         except Exception:
             log.exception("Conversation failed")
         finally:
@@ -186,9 +198,58 @@ class JarvisApp:
             if error:
                 self.speak(error)
             return step
+        if step.wallpaper == "decline":
+            remember(declined=True)
+        if step.wallpaper == "install":
+            if step.say:
+                self.speak(step.say)
+            self.state.update(mode="thinking", status="Installing wallpaper", caption="")
+            self.speak(install_and_apply())
+            return step
         if step.say:
             self.speak(step.say)
         return step
+
+    def _understand(self, heard: Heard, catalog: Catalog) -> Step:
+        if heard.error:
+            return Step(say="I can't reach speech recognition right now, sir.", listen=False, phase="idle")
+        options = list(heard.options or [])
+        if heard.text and heard.text not in options:
+            options.insert(0, heard.text)
+        intent = interpret(options, catalog, self.brain.phase)
+        if intent is None:
+            return self.brain.handle(heard.text, catalog)
+        return self.brain.apply(intent, catalog, heard.text)
+
+    def offer_wallpaper(self) -> None:
+        if self._quitting or not should_ask():
+            return
+        if not self._busy.acquire(blocking=False):
+            self._offer_attempts += 1
+            if self._offer_attempts < 4:
+                threading.Timer(8.0, self.offer_wallpaper).start()
+            return
+        threading.Thread(target=self._offer_wallpaper, name="jarvis-wallpaper", daemon=True).start()
+
+    def _offer_wallpaper(self) -> None:
+        try:
+            self.brain.phase = "wallpaper"
+            self.brain._greeted = True
+            step = Step(say=ASK_LINE, listen=True, phase="wallpaper")
+            while True:
+                step = self._act(step)
+                if not step.listen:
+                    break
+                self.state.update(mode="listening", status="Listening", caption="", amplitude=0.0)
+                heard = self.ears.capture(8)
+                if heard.text:
+                    self.state.update(status=f"Heard: {heard.text}", caption=heard.text)
+                step = self._understand(heard, self.catalog())
+        except Exception:
+            log.exception("Wallpaper question failed")
+        finally:
+            self.state.update(mode="idle", status="Standing by", caption="", amplitude=0.0)
+            self._busy.release()
 
     def hide(self) -> None:
         if self.window is not None:
@@ -215,8 +276,10 @@ class JarvisApp:
     def run(self) -> None:
         import webview
 
+        self.link.start()
         self.ears.start()
         self._start_tray()
+        threading.Timer(3.0, self.offer_wallpaper).start()
         api = Api(self)
         x, y = _center(WIDTH, HEIGHT)
         self.window = webview.create_window(
@@ -316,6 +379,16 @@ def main() -> None:
     _prepare_windows()
     if _already_running():
         log.info("JarvisAI is already running")
+        return
+    if not api_key():
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "JarvisAI needs a Gemini API key before it can start.\n\n"
+            "Set the GEMINI_API_KEY user environment variable, then open JarvisAI again.\n"
+            "The key is not stored in the program folder.",
+            "JarvisAI",
+            0x30,
+        )
         return
     try:
         ensure_autostart()
