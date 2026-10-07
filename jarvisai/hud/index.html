@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>JarvisAI</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="vignette"></div>
+  <header>
+    <span class="brand pywebview-drag-region">J.A.R.V.I.S.</span>
+    <div class="drag-fill pywebview-drag-region"></div>
+    <div class="actions">
+      <button id="settings-open" type="button" title="Voice settings">⚙</button>
+      <button id="hide" type="button" title="Hide to tray">–</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="orb" class="pywebview-drag-region">
+      <canvas id="rings" width="640" height="640"></canvas>
+      <div class="core">
+        <p class="title">J.A.R.V.I.S.</p>
+        <p id="status">Starting systems</p>
+      </div>
+    </div>
+    <p id="caption"></p>
+    <p id="voice">Voice</p>
+  </main>
+
+  <section id="settings" class="hidden">
+    <div class="panel">
+      <h2>Voice</h2>
+      <p>Daniel is the closest premade ElevenLabs voice to J.A.R.V.I.S. Paste your API key and he will use it. Without a key, a British backup voice speaks instead.</p>
+      <label for="api-key">ElevenLabs API key</label>
+      <input id="api-key" type="password" autocomplete="off" spellcheck="false" />
+      <div class="row">
+        <button id="save" type="button">Save</button>
+        <button id="test-voice" type="button">Test voice</button>
+        <button id="listen-now" type="button">Listen now</button>
+      </div>
+      <p id="settings-note"></p>
+      <button id="settings-close" type="button" class="ghost">Close</button>
+    </div>
+  </section>
+  <script src="hud.js"></script>
+</body>
+</html>

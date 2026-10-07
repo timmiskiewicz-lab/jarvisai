@@ -1,0 +1,245 @@
+@font-face {
+  font-family: "Orbitron";
+  src: url("Orbitron.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+}
+
+:root {
+  color-scheme: dark;
+  --cyan: #7aefff;
+  --gold: #e2b15a;
+  --ink: #d7f6ff;
+  --muted: rgba(170, 220, 235, 0.72);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #061018;
+  color: var(--ink);
+  font-family: "Segoe UI", sans-serif;
+  user-select: none;
+}
+
+body {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(18, 84, 112, 0.45), transparent 34%),
+    radial-gradient(circle at 50% 50%, #0a2433 0%, #061018 58%, #03080d 100%);
+}
+
+.grid {
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(90, 190, 220, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90, 190, 220, 0.05) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at 50% 46%, #000 30%, transparent 75%);
+  pointer-events: none;
+}
+
+.vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 180px rgba(0, 0, 0, 0.55);
+}
+
+header {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
+  padding: 0 18px;
+  -webkit-app-region: drag;
+}
+
+.brand {
+  font-family: "Orbitron", "Segoe UI", sans-serif;
+  letter-spacing: 0.42em;
+  font-size: 12px;
+  color: rgba(190, 240, 255, 0.78);
+}
+
+.drag-fill {
+  flex: 1;
+  height: 100%;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+button {
+  border: 1px solid rgba(122, 239, 255, 0.35);
+  background: rgba(8, 28, 40, 0.8);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--cyan);
+  color: white;
+}
+
+.actions button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 18px;
+}
+
+main {
+  position: relative;
+  z-index: 1;
+  height: calc(100% - 54px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+#orb {
+  position: relative;
+  width: 640px;
+  height: 640px;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+canvas {
+  width: 640px;
+  height: 640px;
+  display: block;
+}
+
+.core {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  font-family: "Orbitron", "Segoe UI", sans-serif;
+  font-size: 34px;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  text-shadow: 0 0 18px rgba(122, 239, 255, 0.65);
+}
+
+#status {
+  margin: 14px 0 0;
+  font-family: "Orbitron", "Segoe UI", sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+#caption {
+  min-height: 32px;
+  margin: 0;
+  max-width: 680px;
+  padding: 0 28px;
+  text-align: center;
+  font-size: 20px;
+  letter-spacing: 0.02em;
+  color: white;
+  text-shadow: 0 0 12px rgba(122, 239, 255, 0.35);
+}
+
+#voice {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+#settings {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 8, 12, 0.72);
+}
+
+#settings.hidden {
+  display: none;
+}
+
+.panel {
+  width: min(520px, calc(100% - 48px));
+  padding: 28px;
+  border: 1px solid rgba(122, 239, 255, 0.35);
+  border-radius: 18px;
+  background: rgba(6, 18, 28, 0.94);
+  box-shadow: 0 0 40px rgba(40, 160, 200, 0.18);
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-family: "Orbitron", "Segoe UI", sans-serif;
+  letter-spacing: 0.18em;
+  font-size: 16px;
+}
+
+.panel p {
+  color: var(--muted);
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+input {
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(122, 239, 255, 0.3);
+  background: #07141d;
+  color: white;
+  font: 14px "Segoe UI", sans-serif;
+  user-select: text;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ghost {
+  margin-top: 14px;
+  background: transparent;
+}

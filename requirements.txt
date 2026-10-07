@@ -1,0 +1,15 @@
+pywebview>=5.3
+sounddevice>=0.5
+numpy>=2.0
+SpeechRecognition>=3.10
+audioop-lts>=0.2
+openwakeword>=0.6
+onnxruntime>=1.20
+edge-tts>=7.0
+miniaudio>=1.59
+pystray>=0.19
+pillow>=10.0
+requests>=2.31
+truststore>=0.10
+pyinstaller>=6.0
+truststore>=0.10

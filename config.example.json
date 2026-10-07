@@ -1,0 +1,7 @@
+{
+  "elevenlabs_api_key": "",
+  "elevenlabs_voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "elevenlabs_model": "eleven_turbo_v2_5",
+  "edge_voice": "en-GB-RyanNeural",
+  "wake_threshold": 0.5
+}
