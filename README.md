@@ -24,6 +24,9 @@ Potem możesz kazać mu odpalić zainstalowaną grę ze Steama:
 - `launch Gothic 1`
 - `odpal Portal 2`
 - `zainstaluj` albo `pobierz` grę, która jest w bibliotece, ale nie jest zainstalowana. Jarvis zaczyna pobieranie i mówi, o której powinno się skończyć.
+- `play Bohemian Rhapsody by Queen` puszcza utwór na Spotify i mówi „Playing Bohemian Rhapsody by Queen, sir.”
+- `play random song by Queen` wybiera losową piosenkę tego zespołu. Jak Spotify jest zainstalowany, otwiera aplikację. Jak nie ma aplikacji, otwiera stronę w przeglądarce.
+- `Jarvis, turn this up` od razu podgłaśnia Windows o 10 procent. Działa też `louder`, `volume up` i `głośniej`.
 
 Gdy na koncie jest więcej niż jeden profil Steama, pyta: „Which profile do you want me to launch, sir?” Odpowiedz `first`, `second` albo nazwą profilu. Jeśli profil nie jest tym, na którym Steam jest teraz zalogowany, Jarvis przełączy konto na czas uruchomienia gry. Steam musi mieć zapamiętane hasło tego profilu.
 

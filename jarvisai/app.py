@@ -14,6 +14,8 @@ from jarvisai.brain import (
     command_score,
     extract_install_target,
     extract_launch_target,
+    extract_spotify,
+    extract_volume,
     is_wake_only,
     rank_games,
     strip_wake,
@@ -24,6 +26,8 @@ from jarvisai.gemini import api_key, interpret
 from jarvisai.link import StateLink
 from jarvisai.paths import hud_dir, log_path
 from jarvisai.wallpaper import ASK_LINE, find_engine, install_and_apply, remember, should_ask
+from jarvisai.spotify import find_song, open_spotify
+from jarvisai.volume import raise_volume
 from jarvisai.steam import (
     autologin_user,
     begin_install,
@@ -137,12 +141,16 @@ class JarvisApp:
             self.state.update(status="Voice failed")
             threading.Event().wait(1.2)
         finally:
-            self.state.update(amplitude=0.0)
+            if self.state.snapshot()["mode"] == "speaking":
+                self.state.update(mode="idle", status="Standing by", amplitude=0.0)
+            else:
+                self.state.update(amplitude=0.0)
 
-    def request_conversation(self) -> None:
+    def request_conversation(self) -> bool:
         if not self._busy.acquire(blocking=False):
-            return
+            return False
         threading.Thread(target=self._conversation, name="jarvis-talk", daemon=True).start()
+        return True
 
     def test_voice(self) -> bool:
         if not self._busy.acquire(blocking=False):
@@ -170,14 +178,15 @@ class JarvisApp:
 
     def _conversation(self) -> None:
         try:
-            clip = self.ears.take_wake_clip()
-            if clip:
-                heard = self.ears.recognize(clip, self.catalog())
-                if heard.text and not is_wake_only(heard.text):
-                    self.brain.begin()
-                    step = self._understand(heard, self.catalog())
-                else:
-                    step = self.brain.begin()
+            heard = self.ears.take_prepared()
+            if heard is None:
+                clip = self.ears.take_wake_clip()
+                heard = self.ears.recognize(clip, self.catalog()) if clip else None
+            if heard and heard.error:
+                step = self._understand(heard, self.catalog())
+            elif heard and heard.text and not is_wake_only(heard.text):
+                self.brain.begin()
+                step = self._understand(heard, self.catalog())
             else:
                 step = self.brain.begin()
             while True:
@@ -203,6 +212,12 @@ class JarvisApp:
             self._busy.release()
 
     def _act(self, step: Step) -> Step:
+        if step.volume:
+            self._turn_up(step.volume)
+            return step
+        if step.spotify:
+            self._play_spotify(step.spotify)
+            return step
         if step.install:
             if step.say:
                 self.speak(step.say)
@@ -248,6 +263,8 @@ class JarvisApp:
         if heard.text and heard.text not in options:
             options.insert(0, heard.text)
         text = heard.text or ""
+        if extract_volume(text) or extract_spotify(strip_wake(text)):
+            return self.brain.handle(text, catalog)
         target = extract_launch_target(strip_wake(text)) or extract_install_target(text)
         clear = (
             self.brain.phase in {"profile", "game", "install", "wallpaper"}
@@ -263,6 +280,38 @@ class JarvisApp:
         if intent is None:
             return self.brain.handle(text, catalog)
         return self.brain.apply(intent, catalog, heard.text)
+
+    def _turn_up(self, step: int) -> None:
+        try:
+            level = raise_volume(step)
+        except Exception:
+            log.exception("Volume did not change")
+            self.speak("I couldn't change the volume, sir.")
+            return
+        if level is None:
+            self.speak("It's already as loud as it goes, sir.")
+            return
+        if step == 10:
+            self.speak("Turning it up, sir.")
+        else:
+            self.speak(f"Turning it up by {step} percent, sir.")
+
+    def _play_spotify(self, ask) -> None:
+        found = find_song(ask)
+        if found:
+            title, artist = found
+        elif ask.title:
+            title, artist = ask.title, ask.artist
+        else:
+            self.speak("I couldn't find that on Spotify, sir.")
+            return
+        self.speak(f"Playing {title} by {artist}, sir.")
+        self.state.update(mode="thinking", status="Opening Spotify", caption=title)
+        try:
+            open_spotify(title, artist)
+        except Exception:
+            log.exception("Spotify did not open")
+            self.speak("I couldn't open Spotify, sir.")
 
     def offer_wallpaper(self) -> None:
         if self._quitting or not should_ask():

@@ -19,7 +19,7 @@ OUT = ROOT / "assets" / "voice"
 FIXED = list(GREETINGS) + [
     "Standing by, sir.",
     "Very well, sir.",
-    "I can launch Steam games for now, sir. Try launch Gothic 1.",
+    "I didn't catch the game, sir. Say the name again.",
     "I can't find Steam on this computer, sir.",
     "I couldn't find that game, sir. Say the name again.",
     "I couldn't find that game in your Steam library, sir.",
@@ -36,6 +36,11 @@ FIXED = list(GREETINGS) + [
     "Gemini is offline, sir. I'll follow the direct commands.",
     "Steam is installing it, sir. It hasn't reported a finish time yet.",
     "That's already installed, sir.",
+    "I couldn't find that on Spotify, sir.",
+    "I couldn't open Spotify, sir.",
+    "Turning it up, sir.",
+    "It's already as loud as it goes, sir.",
+    "I couldn't change the volume, sir.",
 ]
 
 

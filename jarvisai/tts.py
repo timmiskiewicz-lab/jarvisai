@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -148,6 +149,17 @@ def _play(samples: np.ndarray, rate: int, on_amplitude) -> None:
             on_amplitude(0.0)
             raise sd.CallbackStop
 
-    with sd.OutputStream(samplerate=rate, channels=1, dtype="float32", callback=callback):
+    deadline = time.time() + (total / float(rate)) + 2.0
+    progressed = time.time()
+    last = 0
+    with sd.OutputStream(samplerate=rate, channels=1, dtype="float32", callback=callback) as stream:
         while cursor < total:
             sd.sleep(30)
+            now = time.time()
+            if cursor != last:
+                last = cursor
+                progressed = now
+            elif now - progressed > 1.5 or now > deadline:
+                log.warning("Playback stalled, releasing the microphone")
+                stream.abort()
+                break

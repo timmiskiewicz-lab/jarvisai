@@ -13,3 +13,4 @@ requests>=2.31
 truststore>=0.10
 pyinstaller>=6.0
 faster-whisper>=1.1
+pycaw>=20240210

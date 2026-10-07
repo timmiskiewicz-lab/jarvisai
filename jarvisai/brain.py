@@ -98,7 +98,15 @@ _YES = re.compile(
 )
 _NO = re.compile(r"\b(no|nope|don't|dont|nie|zostaw|pomin|pomiń|later|pozniej|później)\b", re.IGNORECASE)
 _WAKE = re.compile(r"\b(?:hey|hi|ok|okay|yo)\s+jarv\w*\b", re.IGNORECASE)
-_JARVIS_WORD = re.compile(r"\bjarv\w*\b", re.IGNORECASE)
+_JARVIS_WORD = re.compile(r"\b(?:jarv\w*|d[zż]arwi\w*|czarwi\w*)\b", re.IGNORECASE)
+_LEADING_JARVIS = re.compile(
+    r"^(?:jarv\w*|d[zż]arwi\w*|czarwi\w*)\b[\s,.:!-]*",
+    re.IGNORECASE,
+)
+_ADDRESS = re.compile(
+    r"^(?:(?:hey|hi|ok|okay|yo|um|uh|play)\b[\s,]*)+",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -113,6 +121,12 @@ class Catalog:
             self.library = []
 
 
+@dataclass(frozen=True)
+class SpotifyAsk:
+    artist: str
+    title: str | None = None
+
+
 @dataclass
 class Step:
     say: str | None = None
@@ -121,6 +135,8 @@ class Step:
     phase: str = "idle"
     wallpaper: str | None = None
     install: Game | None = None
+    spotify: SpotifyAsk | None = None
+    volume: int | None = None
 
 
 def normalize(text: str) -> str:
@@ -185,7 +201,15 @@ def parse_ordinal(text: str) -> int | None:
 
 
 def strip_wake(text: str) -> str:
-    return _WAKE.sub(" ", text).strip(" ,.")
+    cleaned = _WAKE.sub(" ", text)
+    cleaned = _LEADING_JARVIS.sub("", cleaned.strip())
+    return re.sub(r"\s+", " ", cleaned).strip(" ,.")
+
+
+def addresses_jarvis(text: str) -> bool:
+    """True when the phrase starts by addressing Jarvis, with or without 'hey'."""
+    cleaned = _ADDRESS.sub("", (text or "").strip())
+    return bool(_JARVIS_WORD.match(cleaned))
 
 
 def is_wake_only(text: str) -> bool:
@@ -246,14 +270,140 @@ def extract_install_target(text: str) -> str | None:
     return target or None
 
 
+_REQUEST = re.compile(r"\b(?:can you|could you|would you|will you|please)\b", re.IGNORECASE)
+_FILLER = re.compile(
+    r"\b(?:please|for me|sir|thanks|thank you|prosze|proszę|pls|"
+    r"can you|could you|would you|will you|"
+    r"launch|start|open|run|play|boot|uruchom|odpal|odpalaj|wlacz|włącz|zagraj|otworz|otwórz|"
+    r"want|went|land|lend|learn|lunch|lounge|launched|launching|"
+    r"the|a|an|game|gre|mi)\b",
+    re.IGNORECASE,
+)
+
+
+def _clean_target(target: str) -> str | None:
+    target = _FILLER.sub(" ", target)
+    target = re.sub(r"[^a-z0-9]+", " ", target, flags=re.IGNORECASE)
+    target = re.sub(r"\s+", " ", target).strip()
+    return target or None
+
+
+_SPOTIFY_LEAD = (
+    r"(?:please\s+|can you\s+|could you\s+|would you\s+|prosze\s+|proszę\s+)*"
+    r"(?:play|put on|pusc|puść|odtworz|odtwórz|zagraj|wlacz|włącz)"
+)
+_SPOTIFY_BY = r"(?:by|from|od|zespolu|zespołu|artysty)"
+_SPOTIFY_RANDOM = re.compile(
+    _SPOTIFY_LEAD
+    + r"\s+(?:a\s+|mi\s+|jakas\s+|jakaś\s+|jakąś\s+)?"
+    + r"(?:random|losow\w+)\s+(?:song|piosenk\w+|utwor|utwór|track)\s+"
+    + _SPOTIFY_BY
+    + r"\s+(.+)$",
+    re.IGNORECASE,
+)
+_SPOTIFY_SONG = re.compile(
+    _SPOTIFY_LEAD + r"\s+(.+?)\s+" + _SPOTIFY_BY + r"\s+(.+)$",
+    re.IGNORECASE,
+)
+_SPOTIFY_TRAIL = re.compile(
+    r"\b(?:please|for me|sir|thanks|thank you|prosze|proszę|pls)\b",
+    re.IGNORECASE,
+)
+
+
+def _spotify_clause(text: str) -> str:
+    cleaned = _SPOTIFY_TRAIL.sub(" ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,_-")
+    return cleaned
+
+
+_VOLUME_UP = re.compile(
+    r"\b(?:jarvis[, ]+)?"
+    r"(?:please[, ]+|can you |could you |would you )?"
+    r"(?:turn (?:this|it|that|the volume|the sound) up|"
+    r"turn up(?: the volume| the sound)?|"
+    r"volume up|louder|crank it up|make it louder|"
+    r"g[lł]o[sś]niej|podg[lł]o[sś]nij|podg[lł]o[sś]|podnie[sś] g[lł]o[sś]no[sś][cć]|"
+    r"zwi[eę]ksz g[lł]o[sś]no[sś][cć])\b",
+    re.IGNORECASE,
+)
+_VOLUME_BY = re.compile(
+    r"\b(?:by|o)\s+(\d{1,3}|[a-ząćęłńóśźż]+(?:\s+[a-ząćęłńóśźż]+)?)\s*(?:%|percent\w*|procent\w*)?",
+    re.IGNORECASE,
+)
+_PERCENT_WORDS = {
+    "five": 5,
+    "ten": 10,
+    "fifteen": 15,
+    "twenty": 20,
+    "twenty five": 25,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
+    "hundred": 100,
+    "piec": 5,
+    "dziesiec": 10,
+    "pietnascie": 15,
+    "dwadziescia": 20,
+    "dwadziescia piec": 25,
+    "trzydziesci": 30,
+    "czterdziesci": 40,
+    "piecdziesiat": 50,
+    "sto": 100,
+}
+
+
+def _percent_token(token: str) -> int | None:
+    digits = re.search(r"\d{1,3}", token)
+    if digits:
+        number = int(digits.group(0))
+    else:
+        folded = token.lower().replace("ą", "a").replace("ć", "c").replace("ę", "e").replace("ł", "l")
+        folded = folded.replace("ń", "n").replace("ó", "o").replace("ś", "s").replace("ź", "z").replace("ż", "z")
+        number = _PERCENT_WORDS.get(folded)
+    if number is None or number < 1:
+        return None
+    return min(100, number)
+
+
+def extract_volume(text: str) -> int | None:
+    """How many percent to add, or None when this is not a volume command."""
+    cleaned = strip_wake(text)
+    if not _VOLUME_UP.search(cleaned):
+        return None
+    match = _VOLUME_BY.search(cleaned)
+    if not match:
+        return 10
+    return _percent_token(match.group(1)) or 10
+
+
+def extract_spotify(text: str) -> SpotifyAsk | None:
+    raw = text.strip()
+    random_match = _SPOTIFY_RANDOM.search(raw)
+    if random_match:
+        artist = _spotify_clause(random_match.group(1))
+        return SpotifyAsk(artist=artist) if artist else None
+    song_match = _SPOTIFY_SONG.search(raw)
+    if not song_match:
+        return None
+    title = _spotify_clause(song_match.group(1))
+    artist = _spotify_clause(song_match.group(2))
+    if not title or not artist:
+        return None
+    return SpotifyAsk(artist=artist, title=title)
+
+
 def extract_launch_target(text: str) -> str | None:
     match = _LAUNCH.search(text.strip())
-    if not match:
+    if match:
+        return _clean_target(match.group(1))
+    if not _REQUEST.search(text):
         return None
-    target = match.group(1)
-    target = re.sub(r"\b(please|for me|sir|thanks|thank you)\b", " ", target, flags=re.IGNORECASE)
-    target = re.sub(r"\s+", " ", target).strip(" .,_-")
-    return target or None
+    return _clean_target(text)
 
 
 def split_profile_hint(text: str) -> tuple[str, str | None]:
@@ -356,17 +506,25 @@ class Brain:
                 if label:
                     raw = re.sub(rf"\b{re.escape(label)}\b", " ", raw, flags=re.IGNORECASE)
         cleaned, hint = split_profile_hint(raw)
+        amount = extract_volume(cleaned)
+        if amount:
+            self.phase = "idle"
+            return Step(listen=False, phase="idle", volume=amount)
+        music = extract_spotify(cleaned)
+        if music is not None:
+            self.phase = "idle"
+            return Step(spotify=music, listen=False, phase="idle")
         install_target = extract_install_target(cleaned)
         if install_target:
             return self._install_named(install_target, catalog, explicit=True)
         target = extract_launch_target(cleaned)
         if not target:
+            self._retries += 1
+            if self._retries <= 1:
+                self.phase = "command"
+                return Step(say="I didn't catch the game, sir. Say the name again.", listen=True, phase="command")
             self.phase = "idle"
-            return Step(
-                say="I can launch Steam games for now, sir. Try launch Gothic 1.",
-                listen=False,
-                phase="idle",
-            )
+            return Step(say="Standing by, sir.", listen=False, phase="idle")
         if not catalog.steam_found:
             self.phase = "idle"
             return Step(say="I can't find Steam on this computer, sir.", listen=False, phase="idle")
@@ -472,6 +630,19 @@ class Brain:
             return Step(say="Very well, sir.", listen=False, phase="idle")
         if kind == "wake":
             return self._acknowledge()
+        if kind == "volume_up":
+            self.phase = "idle"
+            spoken = extract_volume(heard or "")
+            amount = spoken if spoken is not None else _percent_token(str(intent.get("amount") or "")) or 10
+            return Step(listen=False, phase="idle", volume=amount)
+        if kind == "spotify":
+            artist = str(intent.get("artist") or "").strip()
+            song = str(intent.get("song") or "").strip()
+            if artist:
+                title = None if intent.get("random") else (song or None)
+                if title or intent.get("random"):
+                    self.phase = "idle"
+                    return Step(spotify=SpotifyAsk(artist=artist, title=title), listen=False, phase="idle")
         if kind == "install" and intent.get("game"):
             return self._install_named(str(intent["game"]), catalog, explicit=True)
         if kind == "launch" and intent.get("game"):

@@ -42,6 +42,7 @@ foreach ($path in @($dist, $work, $spec)) {
     --collect-all webview `
     --collect-all edge_tts `
     --collect-all _sounddevice_data `
+    --collect-all comtypes `
     (Join-Path $root "jarvisai\__main__.py")
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"

@@ -4,11 +4,16 @@ from jarvisai.brain import (
     Brain,
     Catalog,
     GREETINGS,
+    addresses_jarvis,
     choose_transcript,
+    extract_launch_target,
+    extract_spotify,
+    extract_volume,
     is_wake_only,
     rank_games,
     score_name,
 )
+from jarvisai.ears import phrase_is_complete
 from jarvisai.steam import Game, Profile, needs_account_switch
 
 GAMES = [
@@ -57,10 +62,24 @@ class ConversationTests(unittest.TestCase):
     def test_hey_jarvis_is_not_a_steam_search(self):
         brain = Brain()
         brain.begin()
-        for phrase in ("Hey Jarvis", "play jarvis", "ok jarvis"):
+        for phrase in ("Hey Jarvis", "play jarvis", "ok jarvis", "Jarvis"):
             step = brain.handle(phrase, catalog())
             self.assertIsNone(step.launch)
             self.assertNotIn("couldn't find", (step.say or "").lower())
+
+    def test_bare_jarvis_still_counts_as_the_wake_word(self):
+        self.assertTrue(is_wake_only("Jarvis"))
+        self.assertTrue(addresses_jarvis("Jarvis"))
+        self.assertTrue(addresses_jarvis("Hey Jarvis, turn this up"))
+        self.assertFalse(addresses_jarvis("turn this up"))
+        self.assertFalse(addresses_jarvis("I saw jarvis yesterday"))
+        self.assertEqual(extract_launch_target("Jarvis launch gothic 1"), "gothic 1")
+
+    def test_he_waits_through_a_short_pause(self):
+        self.assertFalse(phrase_is_complete(800, 2000))
+        self.assertFalse(phrase_is_complete(1400, 200))
+        self.assertTrue(phrase_is_complete(1400, 500))
+        self.assertTrue(phrase_is_complete(0, 5500))
 
     def test_wallpaper_yes_and_no(self):
         brain = Brain()
@@ -105,6 +124,24 @@ class ConversationTests(unittest.TestCase):
         self.assertIsNotNone(step.install)
         self.assertEqual(step.install.name, "Hollow Knight")
         self.assertIn("downloading", (step.say or "").lower())
+
+    def test_can_you_launch_survives_a_misheard_verb(self):
+        games = GAMES + [Game("361420", "ASTRONEER")]
+        library = Catalog(True, games, [PROFILES[0]])
+        brain = Brain()
+        brain.begin()
+        step = brain.handle("Can you want astroneer please", library)
+        self.assertIsNotNone(step.launch)
+        self.assertEqual(step.launch[0].name, "ASTRONEER")
+        chosen = choose_transcript(
+            [
+                "Can you want astroneer please",
+                "can you launch Australia please",
+                "can you launch astronauts please",
+            ],
+            library,
+        )
+        self.assertIn("astroneer", chosen.lower())
 
     def test_transcript_prefers_the_installed_game(self):
         self.assertTrue(is_wake_only("Play Jarvis"))
@@ -212,6 +249,54 @@ class VdfTests(unittest.TestCase):
             """
         )
         self.assertEqual(users["users"]["1"]["PersonaName"], "Alpha")
+
+
+class VolumeCommandTests(unittest.TestCase):
+    def test_turn_this_up_is_immediate(self):
+        self.assertEqual(extract_volume("Jarvis turn this up"), 10)
+        self.assertEqual(extract_volume("Jarvis turn this up by 25 percent"), 25)
+        self.assertEqual(extract_volume("turn this up by 25%"), 25)
+        self.assertEqual(extract_volume("turn this up by twenty five percent"), 25)
+        self.assertEqual(extract_volume("podgłośnij o 30 procent"), 30)
+        self.assertEqual(extract_volume("hey jarvis, can you turn it up"), 10)
+        self.assertEqual(extract_volume("głośniej"), 10)
+        self.assertIsNone(extract_volume("play gothic 1"))
+        brain = Brain()
+        brain.begin()
+        step = brain.handle("Jarvis, turn this up", catalog())
+        self.assertEqual(step.volume, 10)
+        by_number = brain.handle("Jarvis turn this up by 40 percent", catalog())
+        self.assertEqual(by_number.volume, 40)
+        self.assertFalse(by_number.listen)
+        self.assertFalse(step.listen)
+        self.assertIsNone(step.launch)
+
+
+class SpotifyCommandTests(unittest.TestCase):
+    def test_play_by_artist_is_a_song(self):
+        ask = extract_spotify("can you play bohemian rhapsody by queen please")
+        self.assertEqual(ask.title, "bohemian rhapsody")
+        self.assertEqual(ask.artist, "queen")
+        brain = Brain()
+        brain.begin()
+        step = brain.handle("play bohemian rhapsody by queen", catalog())
+        self.assertIsNotNone(step.spotify)
+        self.assertIsNone(step.launch)
+
+    def test_random_song_and_polish(self):
+        ask = extract_spotify("play random song by queen")
+        self.assertIsNone(ask.title)
+        self.assertEqual(ask.artist, "queen")
+        polish = extract_spotify("odtwórz losową piosenkę zespołu queen")
+        self.assertIsNone(polish.title)
+        self.assertEqual(polish.artist, "queen")
+
+    def test_a_game_is_not_a_song(self):
+        self.assertIsNone(extract_spotify("play gothic 1"))
+        brain = Brain()
+        brain.begin()
+        step = brain.handle("play gothic 1", catalog(profiles=[PROFILES[0]]))
+        self.assertEqual(step.launch[0].name, "Gothic 1")
 
 
 if __name__ == "__main__":

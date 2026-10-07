@@ -10,13 +10,24 @@ import winreg
 
 import requests
 
-from jarvisai.brain import Catalog
+from jarvisai.brain import Catalog, _percent_token
 
 log = logging.getLogger("jarvisai.gemini")
 
 _ENV_NAME = "GEMINI_API_KEY"
 _MODELS = ("gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash")
-_INTENTS = {"wake", "launch", "install", "choose", "cancel", "wallpaper_yes", "wallpaper_no", "unknown"}
+_INTENTS = {
+    "wake",
+    "launch",
+    "install",
+    "choose",
+    "cancel",
+    "wallpaper_yes",
+    "wallpaper_no",
+    "spotify",
+    "volume_up",
+    "unknown",
+}
 
 
 def api_key() -> str:
@@ -45,10 +56,19 @@ def parse_intent(raw: str) -> dict:
     kind = str(data.get("intent") or "unknown").strip().lower()
     if kind not in _INTENTS:
         kind = "unknown"
+    flag = data.get("random")
+    if isinstance(flag, str):
+        random_song = flag.strip().lower() in {"1", "true", "yes"}
+    else:
+        random_song = bool(flag)
     return {
         "intent": kind,
         "game": str(data.get("game") or "").strip(),
         "choice": str(data.get("choice") or "").strip(),
+        "song": str(data.get("song") or "").strip(),
+        "artist": str(data.get("artist") or "").strip(),
+        "random": random_song,
+        "amount": _percent_token(str(data.get("amount") or "")),
     }
 
 
@@ -82,7 +102,9 @@ def _prompt(heard: list[str], catalog: Catalog, phase: str) -> str:
     return (
         "You understand short spoken commands for a desktop assistant called Jarvis. "
         "The speaker usually talks in Polish, sometimes English, and speech recognition is often wrong. "
-        "odpal, uruchom, włącz, zagraj and otwórz mean launch. "
+        "odpal, uruchom, włącz and otwórz mean launch a Steam game. "
+        "play or zagraj followed by a song and by/od/zespołu means Spotify, not a game. "
+        "play random song by an artist means Spotify with random true. "
         "zainstaluj, instaluj, pobierz and ściągnij mean install. "
         "jeden dwa trzy mean 1 2 3.\n"
         f"Conversation phase: {phase}\n"
@@ -91,11 +113,17 @@ def _prompt(heard: list[str], catalog: Catalog, phase: str) -> str:
         f"Steam profiles, in order:\n{profile_text}\n"
         f"What the microphone heard:\n{alternatives}\n"
         "Reply with one JSON object and nothing else. Fields:\n"
-        'intent: "wake", "launch", "install", "choose", "cancel", "wallpaper_yes", "wallpaper_no", or "unknown".\n'
+        'intent: "wake", "launch", "install", "choose", "cancel", "wallpaper_yes", "wallpaper_no", "spotify", "volume_up", or "unknown".\n'
         "game: exact game name copied from one of the lists, or empty.\n"
         "choice: first, second, third, or a profile name from the list, or empty.\n"
+        "song: the song title for Spotify, or empty when random is true.\n"
+        "artist: the artist or band for Spotify, or empty.\n"
+        "random: true when they want any song by that artist, otherwise false.\n"
+        "amount: percent to raise the volume, such as 20 for turn this up by 20 percent, or empty.\n"
         "Use wake when they only said the wake phrase. "
         "Use launch when they want an installed game opened. "
+        "Use spotify when they want a song, including play something by someone, or a random song by an artist. "
+        "Use volume_up when they want the computer louder, such as turn this up, turn this up by 20 percent, louder, or głośniej. "
         "Use install when they want a game downloaded, or when the game is only in the owned list. "
         "Never invent a game that is not in the lists. "
         "Use choose when they are picking from a list already offered. "
