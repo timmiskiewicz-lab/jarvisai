@@ -34,6 +34,8 @@ FIXED = list(GREETINGS) + [
     "I can't find Wallpaper Engine on this computer, sir.",
     "I couldn't install the wallpaper, sir.",
     "Gemini is offline, sir. I'll follow the direct commands.",
+    "Steam is installing it, sir. It hasn't reported a finish time yet.",
+    "That's already installed, sir.",
 ]
 
 

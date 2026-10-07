@@ -17,12 +17,13 @@ Zamknięcie okna chowa je do zasobnika. Wyłączenie jest w menu ikony przy zega
 
 ## Mówienie
 
-Powiedz **Hey Jarvis**. Odpowiada jedną z kwestii, na przykład „What's up, sir?”, „At your service.” albo „Yes, sir?”.
+Powiedz **Hey Jarvis**. Odpowiada dłuższą kwestią, na przykład „What's up, sir? What are you doing today?”.
 
 Potem możesz kazać mu odpalić zainstalowaną grę ze Steama:
 
 - `launch Gothic 1`
-- `play Portal 2`
+- `odpal Portal 2`
+- `zainstaluj` albo `pobierz` grę, która jest w bibliotece, ale nie jest zainstalowana. Jarvis zaczyna pobieranie i mówi, o której powinno się skończyć.
 
 Gdy na koncie jest więcej niż jeden profil Steama, pyta: „Which profile do you want me to launch, sir?” Odpowiedz `first`, `second` albo nazwą profilu. Jeśli profil nie jest tym, na którym Steam jest teraz zalogowany, Jarvis przełączy konto na czas uruchomienia gry. Steam musi mieć zapamiętane hasło tego profilu.
 

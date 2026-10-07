@@ -7,7 +7,17 @@ import sys
 import threading
 
 from jarvisai.autostart import ensure_autostart
-from jarvisai.brain import Brain, Catalog, Step
+from jarvisai.brain import (
+    Brain,
+    Catalog,
+    Step,
+    command_score,
+    extract_install_target,
+    extract_launch_target,
+    is_wake_only,
+    rank_games,
+    strip_wake,
+)
 from jarvisai.config import load_settings, save_settings
 from jarvisai.ears import Ears, Heard
 from jarvisai.gemini import api_key, interpret
@@ -16,11 +26,13 @@ from jarvisai.paths import hud_dir, log_path
 from jarvisai.wallpaper import ASK_LINE, find_engine, install_and_apply, remember, should_ask
 from jarvisai.steam import (
     autologin_user,
+    begin_install,
     installed_games,
     launch_game,
     needs_account_switch,
     steam_profiles,
     steam_root,
+    uninstalled_games,
 )
 from jarvisai.tts import Speaker
 
@@ -151,20 +163,29 @@ class JarvisApp:
         if root is None:
             return Catalog(False, [], [])
         try:
-            return Catalog(True, installed_games(root), steam_profiles(root))
+            return Catalog(True, installed_games(root), steam_profiles(root), uninstalled_games(root))
         except Exception:
             log.exception("Could not read Steam")
             return Catalog(True, [], [])
 
     def _conversation(self) -> None:
         try:
-            step = self.brain.begin()
+            clip = self.ears.take_wake_clip()
+            if clip:
+                heard = self.ears.recognize(clip, self.catalog())
+                if heard.text and not is_wake_only(heard.text):
+                    self.brain.begin()
+                    step = self._understand(heard, self.catalog())
+                else:
+                    step = self.brain.begin()
+            else:
+                step = self.brain.begin()
             while True:
                 step = self._act(step)
                 if not step.listen:
                     break
                 self.state.update(mode="listening", status="Listening", caption="", amplitude=0.0)
-                heard = self.ears.capture(8)
+                heard = self.ears.capture(6)
                 if heard.error:
                     step = Step(
                         say="I can't reach speech recognition right now, sir.",
@@ -182,6 +203,16 @@ class JarvisApp:
             self._busy.release()
 
     def _act(self, step: Step) -> Step:
+        if step.install:
+            if step.say:
+                self.speak(step.say)
+            self.state.update(mode="thinking", status="Installing", caption=step.install.name)
+            when = begin_install(step.install)
+            if when:
+                self.speak(f"It should be finished at {when}, sir.")
+            else:
+                self.speak("Steam is installing it, sir. It hasn't reported a finish time yet.")
+            return step
         if step.launch:
             game, profile = step.launch
             current = autologin_user()
@@ -216,9 +247,21 @@ class JarvisApp:
         options = list(heard.options or [])
         if heard.text and heard.text not in options:
             options.insert(0, heard.text)
+        text = heard.text or ""
+        target = extract_launch_target(strip_wake(text)) or extract_install_target(text)
+        clear = (
+            self.brain.phase in {"profile", "game", "install", "wallpaper"}
+            or is_wake_only(text)
+            or bool(extract_install_target(text))
+            or command_score(text, catalog) >= 0.8
+            or bool(target and rank_games(target, catalog.library or []))
+        )
+        if clear:
+            return self.brain.handle(text, catalog)
+        self.state.update(mode="thinking", status="Understanding", caption=text)
         intent = interpret(options, catalog, self.brain.phase)
         if intent is None:
-            return self.brain.handle(heard.text, catalog)
+            return self.brain.handle(text, catalog)
         return self.brain.apply(intent, catalog, heard.text)
 
     def offer_wallpaper(self) -> None:
@@ -241,7 +284,7 @@ class JarvisApp:
                 if not step.listen:
                     break
                 self.state.update(mode="listening", status="Listening", caption="", amplitude=0.0)
-                heard = self.ears.capture(8)
+                heard = self.ears.capture(6)
                 if heard.text:
                     self.state.update(status=f"Heard: {heard.text}", caption=heard.text)
                 step = self._understand(heard, self.catalog())

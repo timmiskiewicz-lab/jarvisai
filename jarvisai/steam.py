@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
+import threading
 import time
 import winreg
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
+from jarvisai.paths import user_data_dir
 from jarvisai.vdf import parse_vdf
 
 log = logging.getLogger("jarvisai.steam")
@@ -19,6 +24,7 @@ STEAM_KEY = r"Software\Valve\Steam"
 class Game:
     appid: str
     name: str
+    installed: bool = True
 
 
 @dataclass(frozen=True)
@@ -211,4 +217,203 @@ def launch_game(game: Game, profile: Profile) -> str | None:
                 set_autologin_user(previous)
             except OSError:
                 log.exception("Could not restore the previous Steam account")
+    return None
+
+
+_names_lock = threading.Lock()
+_names: dict[str, str] | None = None
+_owned_cache: tuple[float, set[str]] | None = None
+
+
+def finish_clock(samples: list[tuple[float, int, int]], now: datetime) -> str | None:
+    """Estimate a local clock time from (timestamp, downloaded, total) samples."""
+    if len(samples) < 2:
+        return None
+    started, downloaded_then, _total_then = samples[0]
+    ended, downloaded, total = samples[-1]
+    elapsed = ended - started
+    gained = downloaded - downloaded_then
+    if elapsed <= 0 or gained < 50_000 or total <= downloaded:
+        return None
+    remaining = total - downloaded
+    finish = now + timedelta(seconds=remaining / (gained / elapsed))
+    return finish.strftime("%H:%M")
+
+
+def uninstalled_games(root: Path | None = None) -> list[Game]:
+    root = root or steam_root()
+    if root is None:
+        return []
+    installed = {game.appid for game in installed_games(root)}
+    names = _library_names()
+    games = [
+        Game(appid, names[appid], False)
+        for appid in sorted(_owned_appids(root))
+        if appid not in installed and names.get(appid)
+    ]
+    games.sort(key=lambda game: game.name.lower())
+    return games
+
+
+def warm_library_names() -> None:
+    root = steam_root()
+    if root is None:
+        return
+    owned = _owned_appids(root)
+    names = dict(_library_names())
+    if owned and owned <= set(names):
+        return
+    try:
+        import requests
+
+        response = requests.get("https://api.steampowered.com/ISteamApps/GetAppList/v2/", timeout=40)
+        response.raise_for_status()
+        apps = response.json().get("applist", {}).get("apps", [])
+    except Exception:
+        log.warning("Could not refresh the Steam library names")
+        return
+    for app in apps:
+        if not isinstance(app, dict):
+            continue
+        appid = str(app.get("appid", "")).strip()
+        name = str(app.get("name", "")).strip()
+        if appid in owned and name:
+            names[appid] = name
+    _store_names(names)
+    log.info("Steam library names ready (%s)", len(names))
+
+
+def search_uninstalled(query: str, root: Path | None = None) -> list[Game]:
+    root = root or steam_root()
+    if root is None or not query.strip():
+        return []
+    installed = {game.appid for game in installed_games(root)}
+    owned = _owned_appids(root)
+    try:
+        import requests
+
+        response = requests.get(
+            "https://steamcommunity.com/actions/SearchApps/" + quote(query.strip()),
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        log.warning("Steam name search failed")
+        return []
+    found: list[Game] = []
+    if not isinstance(payload, list):
+        return []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        appid = str(item.get("appid", "")).strip()
+        name = str(item.get("name", "")).strip()
+        if appid in owned and appid not in installed and name:
+            found.append(Game(appid, name, False))
+    if found:
+        names = dict(_library_names())
+        for game in found:
+            names[game.appid] = game.name
+        _store_names(names)
+    return found
+
+
+def begin_install(game: Game) -> str | None:
+    """Start a Steam install. Returns the local time it should finish, when known."""
+    exe = steam_exe()
+    if exe is None:
+        return None
+    subprocess.Popen([str(exe), f"steam://install/{game.appid}"], creationflags=CREATE_NO_WINDOW)
+    samples: list[tuple[float, int, int]] = []
+    deadline = time.time() + 8
+    while time.time() < deadline and len(samples) < 3:
+        progress = _download_progress(game.appid)
+        if progress is not None:
+            samples.append((time.time(), progress[0], progress[1]))
+        time.sleep(1.4)
+    return finish_clock(samples, datetime.now())
+
+
+def _names_path() -> Path:
+    return user_data_dir() / "library_names.json"
+
+
+def _library_names() -> dict[str, str]:
+    global _names
+    with _names_lock:
+        if _names is not None:
+            return _names
+        path = _names_path()
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                _names = {str(key): str(value) for key, value in loaded.items()} if isinstance(loaded, dict) else {}
+            except (OSError, json.JSONDecodeError):
+                _names = {}
+        else:
+            _names = {}
+        return _names
+
+
+def _store_names(names: dict[str, str]) -> None:
+    global _names
+    with _names_lock:
+        _names = names
+    try:
+        _names_path().write_text(json.dumps(names), encoding="utf-8")
+    except OSError:
+        log.warning("Could not save Steam library names")
+
+
+def _owned_appids(root: Path) -> set[str]:
+    global _owned_cache
+    now = time.time()
+    if _owned_cache and now - _owned_cache[0] < 20:
+        return _owned_cache[1]
+    found: set[str] = set()
+    cache = root / "appcache" / "librarycache"
+    if cache.exists():
+        for path in cache.iterdir():
+            if path.name.isdigit():
+                found.add(path.name)
+    users = root / "userdata"
+    if users.exists():
+        for folder in users.iterdir():
+            local = folder / "config" / "localconfig.vdf"
+            if not local.exists():
+                continue
+            data = _read_vdf(local)
+            apps = (
+                data.get("UserLocalConfigStore", {})
+                .get("Software", {})
+                .get("Valve", {})
+                .get("Steam", {})
+                .get("apps", {})
+            )
+            if isinstance(apps, dict):
+                found.update(key for key in apps if str(key).isdigit())
+    _owned_cache = (now, found)
+    return found
+
+
+def _download_progress(appid: str) -> tuple[int, int] | None:
+    root = steam_root()
+    if root is None:
+        return None
+    for library in library_roots(root):
+        manifest = library / "steamapps" / f"appmanifest_{appid}.acf"
+        if not manifest.exists():
+            continue
+        data = _read_vdf(manifest)
+        state = data.get("AppState", data)
+        if not isinstance(state, dict):
+            continue
+        try:
+            downloaded = int(state.get("BytesDownloaded") or 0)
+            total = int(state.get("BytesToDownload") or 0)
+        except (TypeError, ValueError):
+            continue
+        if total > 0:
+            return downloaded, total
     return None

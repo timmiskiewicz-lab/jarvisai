@@ -23,8 +23,8 @@ PROFILES = [
 ]
 
 
-def catalog(profiles=None, steam_found=True) -> Catalog:
-    return Catalog(steam_found, GAMES, PROFILES if profiles is None else profiles)
+def catalog(profiles=None, steam_found=True, library=None) -> Catalog:
+    return Catalog(steam_found, GAMES, PROFILES if profiles is None else profiles, library or [])
 
 
 class MatchingTests(unittest.TestCase):
@@ -79,6 +79,32 @@ class ConversationTests(unittest.TestCase):
         step = brain.apply({"intent": "launch", "game": "Portal 2", "choice": ""}, one, "odpal to")
         self.assertIsNotNone(step.launch)
         self.assertEqual(step.launch[0].name, "Portal 2")
+
+    def test_installs_a_library_game_and_reports_the_clock(self):
+        from datetime import datetime
+
+        from jarvisai.steam import finish_clock
+
+        library = [Game("1", "Hollow Knight", False)]
+        brain = Brain()
+        brain.begin()
+        step = brain.handle("zainstaluj hollow knight", catalog(library=library))
+        self.assertIsNotNone(step.install)
+        self.assertEqual(step.install.name, "Hollow Knight")
+        when = finish_clock(
+            [(0.0, 0, 8_000_000), (2.0, 200_000, 8_000_000)],
+            datetime(2026, 10, 7, 18, 0, 0),
+        )
+        self.assertEqual(when, "18:01")
+
+    def test_launch_of_an_uninstalled_game_starts_a_download(self):
+        library = [Game("1", "Hollow Knight", False)]
+        brain = Brain()
+        brain.begin()
+        step = brain.handle("odpal hollow knight", catalog(library=library))
+        self.assertIsNotNone(step.install)
+        self.assertEqual(step.install.name, "Hollow Knight")
+        self.assertIn("downloading", (step.say or "").lower())
 
     def test_transcript_prefers_the_installed_game(self):
         self.assertTrue(is_wake_only("Play Jarvis"))

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import queue
 import re
 import shutil
+import socket
 import sys
 import threading
 import time
@@ -12,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from jarvisai.brain import Catalog, choose_transcript, command_score, is_wake_only
+from jarvisai.brain import Catalog, choose_transcript
 
 log = logging.getLogger("jarvisai.ears")
 
@@ -45,6 +47,8 @@ class Ears:
         self._hits = 0
         self._cooldown_until = 0.0
         self._was_busy = False
+        self._wake_clip: list[np.ndarray] = []
+        self._mode_since = 0.0
         self._thread = threading.Thread(target=self._run, name="jarvis-ears", daemon=True)
 
     def start(self) -> None:
@@ -53,20 +57,35 @@ class Ears:
     def stop(self) -> None:
         self.running = False
 
-    def capture(self, timeout: float = 8.0) -> Heard:
+    def capture(self, timeout: float = 6.0) -> Heard:
         with self._lock:
             self._generation += 1
             self._result = None
             self._done.clear()
             self._capture = True
         self.state.update(mode="listening", status="Listening", caption="", amplitude=0.0)
-        finished = self._done.wait(timeout + 12)
+        finished = self._done.wait(timeout + 8)
         with self._lock:
             self._capture = False
             result = self._result
         if not finished or result is None:
-            return Heard(None)
+            self.state.update(mode="idle", status="Standing by", amplitude=0.0)
+            return Heard("")
         return result
+
+    def take_wake_clip(self) -> bytes | None:
+        with self._lock:
+            frames = self._wake_clip
+            self._wake_clip = []
+        if len(frames) < 18:
+            return None
+        loud = sum(1 for frame in frames if _rms(frame) >= 180)
+        if loud < 16:
+            return None
+        return np.concatenate(frames).tobytes()
+
+    def recognize(self, raw: bytes, catalog: Catalog) -> Heard:
+        return _recognize(raw, catalog)
 
     def _finish(self, generation: int, heard: Heard) -> None:
         with self._lock:
@@ -95,27 +114,45 @@ class Ears:
                 time.sleep(3)
 
     def _listen(self, sd, model) -> None:
+        frames: queue.Queue[np.ndarray] = queue.Queue(maxsize=80)
+
+        def callback(indata, _frames, _time_info, _status) -> None:
+            chunk = np.squeeze(indata).astype(np.int16).copy()
+            if chunk.size != FRAME:
+                return
+            try:
+                frames.put_nowait(chunk)
+            except queue.Full:
+                try:
+                    frames.get_nowait()
+                except queue.Empty:
+                    pass
+
         with sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=1,
             dtype="int16",
             blocksize=FRAME,
-        ) as stream:
+            callback=callback,
+        ):
             self.state.update(status="Standing by")
             buffer: list[np.ndarray] = []
-            preroll: deque[np.ndarray] = deque(maxlen=8)
+            preroll: deque[np.ndarray] = deque(maxlen=12)
             started = False
+            handed = False
             silence_ms = 0
             started_at = 0.0
             generation = -1
             while self.running:
-                frame, _overflow = stream.read(FRAME)
-                samples = np.squeeze(frame).astype(np.int16)
-                if samples.size != FRAME:
+                try:
+                    samples = frames.get(timeout=0.5)
+                except queue.Empty:
+                    self._unstick()
                     continue
                 loud = _rms(samples)
                 capturing = self._capture
                 mode = self.state.snapshot()["mode"]
+                self._unstick(mode)
 
                 if mode != "speaking":
                     level = max(0.0, min(1.0, loud / 3500.0))
@@ -125,12 +162,15 @@ class Ears:
                 if capturing:
                     if generation != self._generation:
                         generation = self._generation
+                        handed = False
                         threshold = max(160.0, self._noise * 2.4)
                         buffer = list(preroll)
                         preroll.clear()
                         started = any(_rms(chunk) >= threshold for chunk in buffer)
                         silence_ms = 0
                         started_at = time.time()
+                    if handed:
+                        continue
                     threshold = max(160.0, self._noise * 2.4)
                     if loud >= threshold:
                         started = True
@@ -139,15 +179,18 @@ class Ears:
                     elif started:
                         buffer.append(samples.copy())
                         silence_ms += 80
-                        if silence_ms >= 1280 or len(buffer) >= 100:
-                            self._transcribe(buffer, generation)
+                        if silence_ms >= 850 or len(buffer) >= 90:
+                            self._transcribe_later(buffer, generation)
                             buffer = []
                             started = False
-                    elif time.time() - started_at > 8.0:
+                            handed = True
+                    elif time.time() - started_at > 6.0:
                         self._finish(generation, Heard(""))
+                        handed = True
                     continue
 
                 generation = -1
+                handed = False
                 if mode == "speaking":
                     preroll.clear()
                 else:
@@ -159,7 +202,7 @@ class Ears:
                     continue
                 if self._was_busy and model is not None:
                     self._was_busy = False
-                    self._cooldown_until = time.time() + 1.2
+                    self._cooldown_until = time.time() + 0.6
                     try:
                         model.reset()
                     except Exception:
@@ -174,7 +217,9 @@ class Ears:
                     self._hits = 0
                 if self._hits >= 2:
                     self._hits = 0
-                    self._cooldown_until = time.time() + 2.5
+                    self._cooldown_until = time.time() + 1.2
+                    with self._lock:
+                        self._wake_clip = list(preroll)
                     log.info("Wake word heard (%.2f)", score)
                     try:
                         model.reset()
@@ -182,6 +227,27 @@ class Ears:
                         log.debug("Wake model reset failed", exc_info=True)
                     self.on_wake()
 
+    def _unstick(self, mode: str | None = None) -> None:
+        mode = mode if mode is not None else self.state.snapshot()["mode"]
+        if mode in {"listening", "thinking"}:
+            if self._mode_since == 0.0:
+                self._mode_since = time.time()
+            elif time.time() - self._mode_since > 28:
+                log.warning("Listener stalled, resetting")
+                self._capture = False
+                self._done.set()
+                self._mode_since = 0.0
+                self.state.update(mode="idle", status="Standing by", amplitude=0.0)
+        else:
+            self._mode_since = 0.0
+
+    def _transcribe_later(self, frames: list[np.ndarray], generation: int) -> None:
+        threading.Thread(
+            target=self._transcribe,
+            args=(frames, generation),
+            name="jarvis-stt-once",
+            daemon=True,
+        ).start()
 
     def _transcribe(self, frames: list[np.ndarray], generation: int) -> None:
         if not frames:
@@ -189,19 +255,9 @@ class Ears:
             return
         self.state.update(mode="thinking", status="Recognizing", amplitude=0.0)
         raw = np.concatenate(frames).tobytes()
-        catalog = self._catalog()
         try:
-            options = _google_options(raw)
-            text = choose_transcript(options, catalog)
-            weak = command_score(text, catalog) < 0.72 and not is_wake_only(text)
-            if weak:
-                names = [game.name for game in catalog.games]
-                options.extend(_whisper_options(raw, names))
-                text = choose_transcript(options, catalog)
-            log.info("Heard: %s", text or "(silence)")
-            if options:
-                log.info("Alternatives: %s", " | ".join(options[:8]))
-            self._finish(generation, Heard(text, options=options[:8]))
+            heard = _recognize(raw, self._catalog())
+            self._finish(generation, heard)
         except Exception as error:
             log.exception("Speech recognition failed")
             self._finish(generation, Heard(None, error=type(error).__name__))
@@ -289,21 +345,46 @@ def _load_whisper():
             return None
 
 
+def _recognize(raw: bytes, catalog: Catalog) -> Heard:
+    options = _google_options(raw)
+    text = choose_transcript(options, catalog)
+    if not options:
+        names = [game.name for game in catalog.games]
+        names.extend(game.name for game in (catalog.library or [])[:40])
+        options.extend(_whisper_options(raw, names))
+        text = choose_transcript(options, catalog)
+    log.info("Heard: %s", text or "(silence)")
+    if options:
+        log.info("Alternatives: %s", " | ".join(options[:8]))
+    return Heard(text, options=options[:8])
+
+
 def _google_options(raw: bytes) -> list[str]:
     import speech_recognition as sr
 
     audio = sr.AudioData(raw, SAMPLE_RATE, 2)
-    recognizer = sr.Recognizer()
     found: list[str] = []
-    for language in ("en-US", "pl-PL"):
+    lock = threading.Lock()
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(4)
+
+    def one(language: str) -> None:
         try:
-            result = recognizer.recognize_google(audio, language=language, show_all=True)
+            result = sr.Recognizer().recognize_google(audio, language=language, show_all=True)
         except Exception as error:
-            if type(error).__name__ == "UnknownValueError":
-                continue
-            log.warning("Google %s failed: %s", language, type(error).__name__)
-            continue
-        found.extend(_transcripts(result))
+            if type(error).__name__ != "UnknownValueError":
+                log.warning("Google %s failed: %s", language, type(error).__name__)
+            return
+        texts = _transcripts(result)
+        with lock:
+            found.extend(texts)
+
+    workers = [threading.Thread(target=one, args=(language,), daemon=True) for language in ("pl-PL", "en-US")]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(4.5)
+    socket.setdefaulttimeout(previous)
     return found
 
 
@@ -329,13 +410,13 @@ def _whisper_options(raw: bytes, names: list[str]) -> list[str]:
     if model is None:
         return []
     audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-    prompt = "Hey Jarvis. Launch, start, open, play, odpal, uruchom, włącz. " + ", ".join(names[:40])
+    prompt = "Hej Jarvis. Odpal, uruchom, włącz, zainstaluj, pobierz. " + ", ".join(names[:30])
     try:
         segments, _info = model.transcribe(
             audio,
             task="transcribe",
             initial_prompt=prompt,
-            beam_size=5,
+            beam_size=1,
             vad_filter=False,
             condition_on_previous_text=False,
         )

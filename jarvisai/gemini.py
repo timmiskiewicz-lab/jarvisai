@@ -16,7 +16,7 @@ log = logging.getLogger("jarvisai.gemini")
 
 _ENV_NAME = "GEMINI_API_KEY"
 _MODELS = ("gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash")
-_INTENTS = {"wake", "launch", "choose", "cancel", "wallpaper_yes", "wallpaper_no", "unknown"}
+_INTENTS = {"wake", "launch", "install", "choose", "cancel", "wallpaper_yes", "wallpaper_no", "unknown"}
 
 
 def api_key() -> str:
@@ -72,6 +72,7 @@ def interpret(options: list[str], catalog: Catalog, phase: str) -> dict | None:
 
 def _prompt(heard: list[str], catalog: Catalog, phase: str) -> str:
     games = "\n".join(f"- {game.name}" for game in catalog.games[:80]) or "- (none)"
+    library = "\n".join(f"- {game.name}" for game in (catalog.library or [])[:80]) or "- (none)"
     profiles = []
     for index, profile in enumerate(catalog.profiles[:8]):
         label = profile.persona_name or "profile"
@@ -80,18 +81,23 @@ def _prompt(heard: list[str], catalog: Catalog, phase: str) -> str:
     alternatives = "\n".join(f"- {line}" for line in heard[:8])
     return (
         "You understand short spoken commands for a desktop assistant called Jarvis. "
-        "The speaker uses Polish and English, and speech recognition is often wrong. "
-        "Choose the meaning that best matches an installed game.\n"
+        "The speaker usually talks in Polish, sometimes English, and speech recognition is often wrong. "
+        "odpal, uruchom, włącz, zagraj and otwórz mean launch. "
+        "zainstaluj, instaluj, pobierz and ściągnij mean install. "
+        "jeden dwa trzy mean 1 2 3.\n"
         f"Conversation phase: {phase}\n"
         f"Installed Steam games:\n{games}\n"
+        f"Owned but not installed:\n{library}\n"
         f"Steam profiles, in order:\n{profile_text}\n"
         f"What the microphone heard:\n{alternatives}\n"
         "Reply with one JSON object and nothing else. Fields:\n"
-        'intent: "wake", "launch", "choose", "cancel", "wallpaper_yes", "wallpaper_no", or "unknown".\n'
-        "game: exact game name copied from the installed list, or empty.\n"
+        'intent: "wake", "launch", "install", "choose", "cancel", "wallpaper_yes", "wallpaper_no", or "unknown".\n'
+        "game: exact game name copied from one of the lists, or empty.\n"
         "choice: first, second, third, or a profile name from the list, or empty.\n"
         "Use wake when they only said the wake phrase. "
-        "Use launch when they want a game opened. Never invent a game that is not in the list. "
+        "Use launch when they want an installed game opened. "
+        "Use install when they want a game downloaded, or when the game is only in the owned list. "
+        "Never invent a game that is not in the lists. "
         "Use choose when they are picking from a list already offered. "
         "Use wallpaper_yes or wallpaper_no only for the desktop wallpaper question. "
         "Use cancel when they want to stop. Otherwise unknown."
@@ -108,7 +114,7 @@ def _generate(prompt: str, key: str) -> str:
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
             },
-            timeout=20,
+            timeout=8,
         )
         if response.status_code in {401, 403}:
             raise RuntimeError(f"Gemini rejected the API key ({response.status_code})")
@@ -117,7 +123,7 @@ def _generate(prompt: str, key: str) -> str:
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 headers={"x-goog-api-key": key, "content-type": "application/json"},
                 json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0}},
-                timeout=20,
+                timeout=8,
             )
         if response.status_code in {401, 403}:
             raise RuntimeError(f"Gemini rejected the API key ({response.status_code})")

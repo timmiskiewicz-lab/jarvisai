@@ -4,19 +4,21 @@ import random
 import re
 from dataclasses import dataclass
 
-from jarvisai.steam import Game, Profile
+from jarvisai.steam import Game, Profile, search_uninstalled
 
 GREETINGS = (
-    "What's up, sir?",
-    "At your service.",
+    "What's up, sir? What are you doing today?",
+    "What's up, sir? What can I do for you?",
+    "At your service, sir. What are you doing today?",
+    "Yes, sir? What would you like me to do?",
+    "Good to hear you, sir. What are we working on?",
+    "Online and ready, sir. Shall I launch something, or install a game?",
+    "Right here, sir. Tell me what you need.",
+    "For you, sir, always. What's the plan today?",
+    "Standing by, sir. Name a game and I'll take care of it.",
+    "Ready when you are, sir. What are you doing today?",
+    "How can I help you, sir? I can launch a game or install one from your library.",
     "Yes, sir?",
-    "How can I help you?",
-    "Online and ready.",
-    "For you, sir, always.",
-    "Standing by.",
-    "Right here, sir.",
-    "Ready when you are.",
-    "Good to hear you, sir.",
 )
 
 _ORDINALS = (
@@ -54,11 +56,25 @@ _NUMBER_WORDS = {
     "eight": "8",
     "nine": "9",
     "ten": "10",
+    "jeden": "1",
+    "dwa": "2",
+    "trzy": "3",
+    "cztery": "4",
+    "piec": "5",
+    "pięć": "5",
+    "szesc": "6",
+    "sześć": "6",
+    "siedem": "7",
+    "osiem": "8",
+    "dziewiec": "9",
+    "dziewięć": "9",
+    "dziesiec": "10",
+    "dziesięć": "10",
 }
 
 _LAUNCH = re.compile(
     r"\b(?:please\s+)?(?:can you\s+|could you\s+|would you\s+)?"
-    r"(?:launch|start|open|run|play|boot|fire up|uruchom|odpal|wlacz|włącz|wlacz|zagraj|otworz|otwórz)"
+    r"(?:launch|start|open|run|play|boot|fire up|uruchom|odpal|odpalaj|wlacz|włącz|zagraj|otworz|otwórz)"
     r"\b\s+(?:the\s+)?(?:game\s+)?(.+)",
     re.IGNORECASE,
 )
@@ -67,6 +83,12 @@ _PROFILE_HINT = re.compile(
     r"(first|second|third|fourth|fifth|sixth|seventh|eighth|"
     r"one|two|three|four|five|six|seven|eight|[1-8])"
     r"\b(?:\s+profile)?",
+    re.IGNORECASE,
+)
+_INSTALL = re.compile(
+    r"\b(?:please\s+)?(?:can you\s+|could you\s+|prosz[eę]\s+)?"
+    r"(?:install|download|zainstaluj|instaluj|pobierz|sciagnij|ściągnij|wgraj)"
+    r"\b\s+(?:mi\s+)?(?:the\s+)?(?:game\s+)?(?:gre\s+)?(.+)",
     re.IGNORECASE,
 )
 _CANCEL = re.compile(r"\b(cancel|never mind|nevermind|stop|abort|forget it|anuluj|nieważne|niewazne)\b", re.IGNORECASE)
@@ -84,6 +106,11 @@ class Catalog:
     steam_found: bool
     games: list[Game]
     profiles: list[Profile]
+    library: list[Game] | None = None
+
+    def __post_init__(self) -> None:
+        if self.library is None:
+            self.library = []
 
 
 @dataclass
@@ -93,6 +120,7 @@ class Step:
     launch: tuple[Game, Profile] | None = None
     phase: str = "idle"
     wallpaper: str | None = None
+    install: Game | None = None
 
 
 def normalize(text: str) -> str:
@@ -209,6 +237,15 @@ def choose_transcript(options: list[str], catalog: Catalog) -> str:
     return cleaned[0]
 
 
+def extract_install_target(text: str) -> str | None:
+    match = _INSTALL.search(text.strip())
+    if not match:
+        return None
+    target = re.sub(r"\b(please|for me|sir|thanks|thank you|prosze|proszę|mi)\b", " ", match.group(1), flags=re.IGNORECASE)
+    target = re.sub(r"\s+", " ", target).strip(" .,_-")
+    return target or None
+
+
 def extract_launch_target(text: str) -> str | None:
     match = _LAUNCH.search(text.strip())
     if not match:
@@ -276,8 +313,8 @@ class Brain:
         self._game = None
         self._pending_hint = None
         self._pending_named = None
-        self._greeted = False
-        return Step(listen=True, phase="command")
+        self._greeted = True
+        return Step(say=random.choice(GREETINGS), listen=True, phase="command")
 
     def _acknowledge(self) -> Step:
         if not self._greeted:
@@ -302,6 +339,8 @@ class Brain:
             self.phase = "idle"
             return Step(say="Very well, sir.", listen=False, phase="idle")
 
+        if self.phase == "install":
+            return self._pick_install(text)
         if self.phase == "game":
             return self._pick_game(text, catalog)
         if self.phase == "profile":
@@ -317,6 +356,9 @@ class Brain:
                 if label:
                     raw = re.sub(rf"\b{re.escape(label)}\b", " ", raw, flags=re.IGNORECASE)
         cleaned, hint = split_profile_hint(raw)
+        install_target = extract_install_target(cleaned)
+        if install_target:
+            return self._install_named(install_target, catalog, explicit=True)
         target = extract_launch_target(cleaned)
         if not target:
             self.phase = "idle"
@@ -330,6 +372,12 @@ class Brain:
             return Step(say="I can't find Steam on this computer, sir.", listen=False, phase="idle")
 
         matches = rank_games(target, catalog.games)
+        if not matches:
+            library_matches = self._library_matches(target, catalog)
+            if len(library_matches) == 1:
+                return self._queue_install(library_matches[0], missing=True)
+            if len(library_matches) > 1:
+                return self._offer_install(library_matches)
         if not matches:
             self._retries += 1
             if self._retries <= 1:
@@ -424,6 +472,8 @@ class Brain:
             return Step(say="Very well, sir.", listen=False, phase="idle")
         if kind == "wake":
             return self._acknowledge()
+        if kind == "install" and intent.get("game"):
+            return self._install_named(str(intent["game"]), catalog, explicit=True)
         if kind == "launch" and intent.get("game"):
             phrase = f"launch {intent['game']}"
             choice = str(intent.get("choice") or "").strip()
@@ -436,6 +486,60 @@ class Brain:
         if kind == "choose":
             return self.handle(str(intent.get("choice") or intent.get("game") or heard or ""), catalog)
         return self.handle(heard, catalog)
+
+    def _install_named(self, target: str, catalog: Catalog, explicit: bool) -> Step:
+        if not catalog.steam_found:
+            self.phase = "idle"
+            return Step(say="I can't find Steam on this computer, sir.", listen=False, phase="idle")
+        installed = rank_games(target, catalog.games)
+        if len(installed) == 1 and explicit:
+            self._game = installed[0]
+            step = self._after_game(catalog, hint=None, named=None)
+            if step.say:
+                step.say = f"That's already installed, sir. {step.say}"
+            return step
+        library_matches = self._library_matches(target, catalog)
+        if len(library_matches) == 1:
+            return self._queue_install(library_matches[0], missing=not explicit)
+        if len(library_matches) > 1:
+            return self._offer_install(library_matches)
+        self._retries += 1
+        if self._retries <= 1:
+            self.phase = "command"
+            return Step(say="I couldn't find that game, sir. Say the name again.", listen=True, phase="command")
+        self.phase = "idle"
+        return Step(say="I couldn't find that game in your Steam library, sir.", listen=False, phase="idle")
+
+    def _library_matches(self, target: str, catalog: Catalog) -> list[Game]:
+        matches = rank_games(target, catalog.library or [])
+        if matches:
+            return matches
+        return rank_games(target, search_uninstalled(target))
+
+    def _offer_install(self, games: list[Game]) -> Step:
+        self._games = games
+        self.phase = "install"
+        self._retries = 0
+        return Step(say=game_prompt(games), listen=True, phase="install")
+
+    def _pick_install(self, text: str) -> Step:
+        index = parse_ordinal(text)
+        if index is None:
+            narrowed = rank_games(text, self._games)
+            if len(narrowed) == 1:
+                return self._queue_install(narrowed[0], missing=False)
+            return self._retry("Say first, second, or the game name, sir.")
+        if index >= len(self._games):
+            return self._retry("That number isn't on the list, sir.")
+        return self._queue_install(self._games[index], missing=False)
+
+    def _queue_install(self, game: Game, missing: bool) -> Step:
+        self.phase = "idle"
+        if missing:
+            line = f"{game.name} isn't installed, sir. I'm downloading it."
+        else:
+            line = f"Installing {game.name}, sir."
+        return Step(say=line, listen=False, phase="idle", install=game)
 
     def _wallpaper_answer(self, text: str) -> Step:
         if _NO.search(text) and not _YES.search(text):
